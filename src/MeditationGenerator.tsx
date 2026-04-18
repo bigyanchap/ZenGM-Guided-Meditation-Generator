@@ -475,10 +475,11 @@ export default function MeditationGenerator({
 
         {/* Pause legend */}
         <div className="flex gap-3 text-[10px] text-[var(--text-muted)] mb-4">
-          <span><span className="text-[var(--accent)]">.</span> 1s</span>
-          <span><span className="text-[var(--accent)]">..</span> 2s</span>
-          <span><span className="text-[var(--accent)]">...</span> 3s</span>
-          <span><span className="text-[var(--accent)]">(n)</span> n sec</span>
+          <span>Pause rules:</span>
+          <span><span className="text-[var(--accent)]">. is 1 sec </span></span>
+          <span><span className="text-[var(--accent)]">.. is 2 secs </span></span>
+          <span><span className="text-[var(--accent)]">... is 3 secs </span></span>
+          <span><span className="text-[var(--accent)]">(n) is n secs </span></span>
         </div>
 
         {/* Generate */}
