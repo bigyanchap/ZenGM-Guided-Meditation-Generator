@@ -1,1 +1,51 @@
 @import "tailwindcss";
+
+:root {
+  --bg: #f7f7f7;
+  --bg-sidebar: #f0f0f0;
+  --bg-surface: #ffffff;
+  --bg-input: #f3f3f3;
+  --bg-hover: rgba(0,0,0,0.04);
+  --bg-active: rgba(0,0,0,0.08);
+  --text-primary: #1a1a1a;
+  --text-secondary: #555;
+  --text-muted: #aaa;
+  --border: rgba(0,0,0,0.08);
+  --border-strong: rgba(0,0,0,0.14);
+  --accent: #D4956A;
+  --accent-bg: rgba(212,149,106,0.12);
+  --scrollbar-thumb: rgba(0,0,0,0.1);
+  --scrollbar-hover: rgba(0,0,0,0.2);
+  --option-bg: #ffffff;
+  --splash-bg: #f7f7f7;
+  --glass-bg: rgba(255,255,255,0.65);
+  --glass-border: rgba(0,0,0,0.08);
+  --glass-indicator: linear-gradient(135deg, rgba(212,149,106,0.25), rgba(212,149,106,0.1));
+  --glass-indicator-border: rgba(212,149,106,0.35);
+  --overlay-bg: rgba(0,0,0,0.25);
+}
+
+[data-theme="dark"] {
+  --bg: #191919;
+  --bg-sidebar: #191919;
+  --bg-surface: #1f1f1f;
+  --bg-input: rgba(255,255,255,0.04);
+  --bg-hover: rgba(255,255,255,0.04);
+  --bg-active: rgba(255,255,255,0.1);
+  --text-primary: #e0e0e0;
+  --text-secondary: #999;
+  --text-muted: #555;
+  --border: rgba(255,255,255,0.06);
+  --border-strong: rgba(255,255,255,0.12);
+  --accent: #D4956A;
+  --accent-bg: rgba(212,149,106,0.1);
+  --scrollbar-thumb: rgba(255,255,255,0.08);
+  --scrollbar-hover: rgba(255,255,255,0.15);
+  --option-bg: #1f1f1f;
+  --splash-bg: #191919;
+  --glass-bg: rgba(255,255,255,0.06);
+  --glass-border: rgba(255,255,255,0.1);
+  --glass-indicator: linear-gradient(135deg, rgba(212,149,106,0.3), rgba(212,149,106,0.12));
+  --glass-indicator-border: rgba(212,149,106,0.4);
+  --overlay-bg: rgba(0,0,0,0.5);
+}

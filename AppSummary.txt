@@ -1,0 +1,32 @@
+# Zen for Engineers - App Summary
+
+## Overview
+Zen for Engineers is a specialized guided meditation application designed specifically for software engineers. It helps users disconnect from the "mental tabs" of deadlines, bugs, and unfinished tasks to find clarity and calm in their work.
+
+## Key Features
+- **Specialized Script**: A default meditation script tailored to the engineering mindset (coding, optimization, performance).
+- **Local TTS (Kokoro)**: Uses the high-quality Kokoro-82M model running locally in the browser via ONNX Runtime in a Web Worker (keeps UI responsive). No API dependency.
+- **Voice Selection**: Choose from multiple premium voices (e.g., Adam, Michael, Bella, Heart).
+- **Smart Pacing**: Pace slider controls voice speed (playback rate). Pauses are exact durations specified in the script.
+- **Segmented Generation**: Breaks the script into logical segments for smooth playback and visual progress tracking.
+- **Modern UI**: A clean, dark-themed interface built with React, Tailwind CSS, and Framer Motion for a calming user experience.
+- **Model Loading Splash**: Full-screen loading screen with progress bar while the 80MB Kokoro model downloads (cached for future visits).
+
+## Pause Rules
+- **Line breaks**: No pause (ignored by parser).
+- **Trailing dots**: 1 dot = 1 second, 2 dots = 2 seconds, 3 dots = 3 seconds, etc. Example: `Close your eyes...` = 3s pause after "Close your eyes."
+- **(n) marker**: Explicit pause of n seconds. Example: `(5)` = 5 second pause.
+- **Pace slider**: Only affects voice playback speed, NOT pause durations.
+
+## Tech Stack
+- React + TypeScript + Vite
+- Tailwind CSS + Framer Motion
+- kokoro-js (Kokoro-82M ONNX model) running in a Web Worker
+- onnxruntime-web (WASM backend)
+
+## Local Execution (Recommended)
+1. Run `npm install`.
+2. Run `npm run dev`.
+3. Open `http://localhost:3000`.
+
+The model will be cached in your browser for near-instant loading on subsequent visits.

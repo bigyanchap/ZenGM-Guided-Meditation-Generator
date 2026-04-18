@@ -1,949 +1,464 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Modality } from "@google/genai";
-import { 
-  Play, 
-  Pause, 
-  RotateCcw, 
-  Download, 
-  Volume2, 
-  VolumeX, 
-  Sparkles,
-  Loader2,
-  Wind,
-  Leaf,
-  Flower2
-} from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Film, Wind, AlertTriangle, RefreshCw, Sun, Moon, Settings, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { KokoroTTS, env } from 'kokoro-js';
+import MeditationGenerator from './MeditationGenerator';
+import VideoGenerator from './VideoGenerator';
+import type { Segment } from './audio-utils';
 
-// Configure transformers.js environment
-if (env) {
-  // Ensure we fetch from Hugging Face
-  (env as any).allowLocalModels = false;
-  (env as any).useBrowserCache = true;
+type Page = 'meditation' | 'video';
+type Theme = 'light' | 'dark';
+type TtsMode = 'free' | 'paid';
+type TtsProvider = 'openai' | 'elevenlabs' | 'unknown';
+
+const OPENAI_VOICES: Record<string, string> = {
+  af_heart: 'nova', af_bella: 'alloy', af_sky: 'shimmer',
+  am_adam: 'echo', am_michael: 'onyx',
+  bf_emma: 'shimmer', bm_george: 'fable',
+};
+
+const ELEVENLABS_VOICES: Record<string, string> = {
+  af_heart: '21m00Tcm4TlvDq8ikWAM',  // Rachel
+  af_bella: 'EXAVITQu4vr4xnSDxMaL',  // Bella
+  af_sky: 'MF3mGyEYCl7XYWbV9V6O',    // Elli
+  am_adam: 'pNInz6obpgDQGcFmaJgB',    // Adam
+  am_michael: 'TxGEqnHWrfWFTfGW9XjX', // Josh
+  bf_emma: 'AZnzlk1XvdvUeBnXmlld',    // Domi
+  bm_george: 'VR6AewLTigWG4xSOukaG',  // Arnold
+};
+
+function detectProvider(key: string): TtsProvider {
+  const k = key.trim();
+  if (k.startsWith('sk-')) return 'openai';
+  if (/^[a-f0-9]{32}$/i.test(k)) return 'elevenlabs';
+  return 'unknown';
 }
 
-// Initialize Gemini (keeping for potential other uses, though TTS is moving to Kokoro)
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-type Segment = {
-  type: 'text' | 'pause';
-  content?: string;
-  duration?: number;
-  audioUrl?: string;
-  isGenerating?: boolean;
+const PROVIDER_LABELS: Record<TtsProvider, string> = {
+  openai: 'OpenAI',
+  elevenlabs: 'ElevenLabs',
+  unknown: 'Unknown',
 };
 
 export default function App() {
-  const [text, setText] = useState(`Guided meditation for Software Engineers......
+  const [activePage, setActivePage] = useState<Page>('meditation');
+  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('theme') as Theme) || 'light');
+  const [showSettings, setShowSettings] = useState(false);
 
-Namaste and Welcome...
-Close all screens if you haven't already... 
+  const [ttsMode, setTtsMode] = useState<TtsMode>(() => (localStorage.getItem('tts_mode') as TtsMode) || 'free');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('tts_api_key') || '');
+  const [showKey, setShowKey] = useState(false);
 
-Silence your phone...
-
-Sit comfortably on a chair or on the floor......
-Keep your spine erect but not too rigid......
-Keep your chin slightly up......
-Keep your hands resting naturally over the knees...
-Close your eyes...
-
-Take a slow breath in through your nose…...
-
-and exhale gently through your mouth…...
-
-Again......
-
-Take a slow breath in through your nose…...
-
-and exhale gently through your mouth…...
-
-Again......
-
-Take a slow breath in through your nose…...
-
-and exhale gently through your mouth…...
-
-Let your breathing return to normal......
-
-Now notice the mental tabs open in your mind......
-
-Notice the Deadlines...
-
-The Unfinished tasks...
-
-Bugs to fix.
-
-Features to ship.
-
-Messages waiting.
-
-You don’t need to close them on the computer...
-
-Just don't engage with it for now...
-
-Just observe what's going on in your mind...
-
-Let it drop if it drops easily......
-
-Don't force it though...
-
-Just let it go if it goes...
-
-Bring attention to your body...
-
-Notice your jaw.
-
-Just look at it with awareness.
-
-Don't give any words...
-
-Just give your attention......
-
-Similarly, notice your shoulders...
-
-Let them drop slightly...
-
-If there is tension, rotate your shoulders slowly 3 times...
-
-1......
-
-2......
-
-3......
-
-and rotate it in the opposite direction 3 times.
-
-1......
-
-2......
-
-3......
-
-Then, notice your forehead...
-
-Imagine a cool breeze is flowing touching your forehead......
-
-Just enjoy it......
-
-Now observe the inner drive......
-
-The part of you that wants to improve everything......
-
-Observe that drive which wants to optimize everything...
-
-Ship faster.
-
-Do better.
-
-Stay ahead.
-
-Do not judge that feeling......
-
-Just observe its energy...
-
-Where do you feel it in the body?
-...
-
-Chest?
-...
-
-Head?
-...
-
-Stomach?
-...
-
-Throat?
-...
-
-Just observe that sensation......
-
-Now ask silently:
-
-Is this clarity? Or is this just a pressure?
-......
-
-Clarity feels steady...
-
-Pressure feels tight...
-
-If you feel tightness, breathe into it......
-
-Slowly and deeply inhale into where you feel the tightness......
-
-Give it some Prana (the life energy)......
-
-Then, exhale slowly......
-
-Next, notice your thoughts......
-
-Is there any thoughts like:
-
-“I must prove myself.”
-
-“I must not fall behind.”
-
-“I can’t fail.”
-...
-
-Notice how the body reacts.
-
-Now gently say inside:
-
-My worth is not measured in output......
-
-Next...
-
-Visualize yourself working.
-
-You are coding.
-
-You are solving problems.
-
-You are building.
-
-But there is no rush inside.
-
-No anxiety.
-
-No comparison with co-workers.
-
-Just clean thinking.
-
-Just elegant code.
-
-Simple.
-
-Clear.
-
-Stable...
-
-Feel that state......
-
-Now ask quietly:
-
-If this project fails…
-
-Am I still whole?
-
-If this sprint goes badly…
-
-Am I still enough?
-
-Do not answer with logic...
-
-Just feel...
-
-Now drop all roles from mind and be nothing.
-
-Drop the engineer in you.
-
-Drop the performer.
-
-Drop the achiever.
-
-Just stillness and silence.
-
-Nothing to debug.
-
-Nothing to optimize.
-
-Nothing to deploy.
-
-Awareness is already complete...
-
-Rest in this state and space of observing those thoughts......
-
-Let the thoughts drop if they drop...
-
-Let it stay if it stays......
-
-You just observe......
-......
-......
-......
-......
-......
-
-Now, slowly, very slowly open your eyes...
-
-Decide to carry this calm into your work...
-
-Do not carry work into your nerves...
-
-Thank You for doing this Meditation with us...
-
-Namaste...`);
-  const [title, setTitle] = useState('Zen for Engineers');
-  const [description, setDescription] = useState('Guided Meditation for software Engineer.');
-  const [pace, setPace] = useState(0.8); // 0.5 to 2.0
   const [segments, setSegments] = useState<Segment[]>([]);
+  const [title, setTitle] = useState('Zen for Engineers');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(-1);
-  const [isMuted, setIsMuted] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [isModelLoading, setIsModelLoading] = useState(true);
+
+  const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [modelLoadProgress, setModelLoadProgress] = useState(0);
-  const ttsRef = useRef<any>(null);
+  const [loadedBytes, setLoadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(0);
+  const [modelError, setModelError] = useState<string | null>(null);
 
-  // Voice options (Kokoro voices)
-  const voices = [
-    { id: 'af_heart', label: 'Heart (US Female)' },
-    { id: 'af_bella', label: 'Bella (US Female)' },
-    { id: 'af_sky', label: 'Sky (US Female)' },
-    { id: 'am_adam', label: 'Adam (US Male)' },
-    { id: 'am_michael', label: 'Michael (US Male)' },
-    { id: 'bf_emma', label: 'Emma (UK Female)' },
-    { id: 'bm_george', label: 'George (UK Male)' },
-  ];
-  const [selectedVoice, setSelectedVoice] = useState('am_michael');
+  const workerRef = useRef<Worker | null>(null);
+  const pendingGenerations = useRef<Map<number, { resolve: (blob: Blob) => void; reject: (e: Error) => void }>>(new Map());
+  const nextId = useRef(0);
 
-  // Initialize Kokoro
+  const usePaidMode = ttsMode === 'paid' && apiKey.trim().length > 0;
+
   useEffect(() => {
-    const initTTS = async () => {
-      console.log("Starting Kokoro TTS initialization...");
-      try {
-        setIsModelLoading(true);
-        setModelLoadProgress(0);
-        
-        // Using the ONNX version of Kokoro-82M
-        const tts = await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
-          dtype: "q8", // Use quantized model for faster loading/execution
-          device: "wasm", // Default to wasm for compatibility
-          progress_callback: (progress: any) => {
-            if (progress.status === 'progress') {
-              console.log(`Model loading: ${Math.round(progress.progress)}%`);
-              setModelLoadProgress(progress.progress);
-            } else if (progress.status === 'done') {
-              console.log(`Model file loaded: ${progress.file}`);
-            } else if (progress.status === 'ready') {
-              console.log("Model is ready!");
-            }
-          }
-        });
-        
-        ttsRef.current = tts;
-        setIsModelLoading(false);
-        console.log("Kokoro TTS initialized successfully.");
-      } catch (error: any) {
-        console.error("Failed to load Kokoro model:", error);
-        setIsModelLoading(false);
-        // Provide a more helpful error message in the UI if possible
-        alert(`Model loading failed: ${error.message || 'Unknown error'}. This is likely due to network restrictions in the preview environment. Downloading the code and running it locally is recommended for this feature.`);
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  useEffect(() => { localStorage.setItem('tts_mode', ttsMode); }, [ttsMode]);
+  useEffect(() => { localStorage.setItem('tts_api_key', apiKey); }, [apiKey]);
+
+  const toggleTheme = () => setTheme(t => t === 'light' ? 'dark' : 'light');
+
+  const initTTS = useCallback(() => {
+    setModelStatus('loading');
+    setModelLoadProgress(0);
+    setLoadedBytes(0);
+    setTotalBytes(0);
+    setModelError(null);
+
+    if (workerRef.current) workerRef.current.terminate();
+
+    const worker = new Worker(
+      new URL('./tts.worker.ts', import.meta.url),
+      { type: 'module' }
+    );
+    workerRef.current = worker;
+
+    worker.onmessage = (e: MessageEvent) => {
+      const msg = e.data;
+      switch (msg.type) {
+        case 'init-progress':
+          setModelLoadProgress(msg.progress);
+          setLoadedBytes(msg.loaded);
+          setTotalBytes(msg.total);
+          break;
+        case 'init-ready':
+          setModelStatus('ready');
+          break;
+        case 'init-error':
+          setModelError(msg.error);
+          setModelStatus('error');
+          break;
+        case 'generated': {
+          const p = pendingGenerations.current.get(msg.id);
+          if (p) { p.resolve(msg.blob as Blob); pendingGenerations.current.delete(msg.id); }
+          break;
+        }
+        case 'generate-error': {
+          const p = pendingGenerations.current.get(msg.id);
+          if (p) { p.reject(new Error(msg.error)); pendingGenerations.current.delete(msg.id); }
+          break;
+        }
       }
     };
-    initTTS();
+
+    worker.onerror = (e) => {
+      console.error('TTS Worker error:', e);
+      setModelError(e.message || 'Worker crashed');
+      setModelStatus('error');
+    };
+
+    worker.postMessage({ type: 'init' });
   }, []);
 
-  const parseText = (input: string) => {
-    // Split by line breaks first
-    const lines = input.split(/\n/);
-    const result: Segment[] = [];
+  useEffect(() => { initTTS(); return () => { workerRef.current?.terminate(); }; }, [initTTS]);
 
-    lines.forEach((line, lineIdx) => {
-      if (!line.trim()) {
-        if (lineIdx < lines.length - 1) {
-          result.push({ type: 'pause', duration: 10 / pace });
-        }
-        return;
-      }
+  const detectedProvider = detectProvider(apiKey);
 
-      // Within each line, handle dots
-      const tokens = line.split(/(\.+)/);
-      
-      tokens.forEach(token => {
-        if (!token) return;
-        
-        if (token.startsWith('.')) {
-          const dotCount = token.length;
-          const duration = (Math.floor(dotCount / 3) * 5 + (dotCount % 3)) / pace;
-          result.push({ type: 'pause', duration });
-        } else {
-          const trimmed = token.trim();
-          if (trimmed) {
-            result.push({ type: 'text', content: trimmed });
-          }
-        }
-      });
-
-      // Add line break pause if not the last line
-      if (lineIdx < lines.length - 1) {
-        result.push({ type: 'pause', duration: 10 / pace });
-      }
+  const generateWithOpenAI = useCallback(async (text: string, voice: string): Promise<Blob> => {
+    const res = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'tts-1',
+        input: text,
+        voice: OPENAI_VOICES[voice] || 'onyx',
+        response_format: 'wav',
+      }),
     });
-
-    return result;
-  };
-
-  const addWavHeaderFromFloat32 = (audioData: Float32Array, sampleRate: number) => {
-    const len = audioData.length;
-    const buffer = new ArrayBuffer(44 + len * 2);
-    const view = new DataView(buffer);
-
-    // RIFF chunk descriptor
-    view.setUint32(0, 0x52494646, false); // "RIFF"
-    view.setUint32(4, 36 + len * 2, true);    // file length
-    view.setUint32(8, 0x57415645, false); // "WAVE"
-
-    // fmt sub-chunk
-    view.setUint32(12, 0x666d7420, false); // "fmt "
-    view.setUint32(16, 16, true);          // sub-chunk size
-    view.setUint16(20, 1, true);           // PCM format
-    view.setUint16(22, 1, true);           // mono
-    view.setUint32(24, sampleRate, true);  // sample rate
-    view.setUint32(28, sampleRate * 2, true); // byte rate
-    view.setUint16(32, 2, true);           // block align
-    view.setUint16(34, 16, true);          // bits per sample
-
-    // data sub-chunk
-    view.setUint32(36, 0x64617461, false); // "data"
-    view.setUint32(40, len * 2, true);         // data length
-
-    // Convert Float32 to Int16
-    for (let i = 0; i < len; i++) {
-      const s = Math.max(-1, Math.min(1, audioData[i]));
-      view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
+      throw new Error(err.error?.message || `API error: ${res.status}`);
     }
+    return res.blob();
+  }, [apiKey]);
 
-    return new Blob([buffer], { type: 'audio/wav' });
-  };
-
-  const generateAudio = async () => {
-    setIsGenerating(true);
-    setIsPlaying(false);
-    setCurrentSegmentIndex(-1);
-    setProgress(0);
-    
-    const parsedSegments = parseText(text);
-    setSegments(parsedSegments.map(s => ({ ...s, isGenerating: s.type === 'text' })));
-
-    try {
-      if (!ttsRef.current) {
-        throw new Error("TTS model not loaded yet.");
-      }
-
-      const updatedSegments = [...parsedSegments];
-      
-      for (let i = 0; i < updatedSegments.length; i++) {
-        const seg = updatedSegments[i];
-        if (seg.type === 'text' && seg.content) {
-          setSegments(prev => prev.map((s, idx) => idx === i ? { ...s, isGenerating: true } : s));
-
-          // Generate audio using local Kokoro model
-          const result = await ttsRef.current.generate(seg.content, {
-            voice: selectedVoice,
-          });
-
-          if (result && result.data) {
-            const audioBlob = addWavHeaderFromFloat32(result.data, result.sampling_rate);
-            updatedSegments[i].audioUrl = URL.createObjectURL(audioBlob);
-          }
-          
-          setSegments(prev => prev.map((s, idx) => idx === i ? { ...s, isGenerating: false, audioUrl: updatedSegments[i].audioUrl } : s));
-        }
-      }
-    } catch (error: any) {
-      console.error("Generation failed:", error);
-      alert(`Generation failed: ${error.message || error}`);
-    } finally {
-      setIsGenerating(false);
+  const generateWithElevenLabs = useCallback(async (text: string, voice: string): Promise<Blob> => {
+    const voiceId = ELEVENLABS_VOICES[voice] || 'TxGEqnHWrfWFTfGW9XjX';
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: { message: res.statusText } }));
+      throw new Error(err.detail?.message || err.detail || `API error: ${res.status}`);
     }
-  };
+    return res.blob();
+  }, [apiKey]);
 
-  const playNext = (index: number) => {
-    if (index >= segments.length) {
-      setIsPlaying(false);
-      setCurrentSegmentIndex(-1);
-      setProgress(100);
-      return;
-    }
+  const generateWithAPI = useCallback(async (text: string, voice: string): Promise<Blob> => {
+    if (detectedProvider === 'openai') return generateWithOpenAI(text, voice);
+    if (detectedProvider === 'elevenlabs') return generateWithElevenLabs(text, voice);
+    return generateWithOpenAI(text, voice);
+  }, [detectedProvider, generateWithOpenAI, generateWithElevenLabs]);
 
-    setCurrentSegmentIndex(index);
-    const segment = segments[index];
-    setProgress((index / segments.length) * 100);
+  const generateWithWorker = useCallback((text: string, voice: string): Promise<Blob> => {
+    return new Promise<Blob>((resolve, reject) => {
+      const id = nextId.current++;
+      pendingGenerations.current.set(id, { resolve, reject });
+      workerRef.current?.postMessage({ type: 'generate', id, text, voice });
+    });
+  }, []);
 
-    if (segment.type === 'text' && segment.audioUrl) {
-      if (audioRef.current) {
-        audioRef.current.src = segment.audioUrl;
-        audioRef.current.playbackRate = pace;
-        audioRef.current.play().catch(e => console.error("Playback failed:", e));
-      }
-    } else if (segment.type === 'pause' && segment.duration) {
-      const timer = setTimeout(() => {
-        if (isPlaying) playNext(index + 1);
-      }, segment.duration * 1000);
-      return () => clearTimeout(timer);
-    } else {
-      playNext(index + 1);
-    }
-  };
+  const generateSegment = useCallback((text: string, voice: string): Promise<Blob> => {
+    if (usePaidMode) return generateWithAPI(text, voice);
+    return generateWithWorker(text, voice);
+  }, [usePaidMode, generateWithAPI, generateWithWorker]);
 
-  const togglePlay = () => {
-    if (isPlaying) {
-      setIsPlaying(false);
-      if (audioRef.current) audioRef.current.pause();
-    } else {
-      if (segments.length === 0) {
-        alert("Please generate audio first.");
-        return;
-      }
-      setIsPlaying(true);
-      if (currentSegmentIndex === -1) {
-        playNext(0);
-      } else {
-        if (segments[currentSegmentIndex].type === 'text' && audioRef.current) {
-          audioRef.current.play();
-        } else {
-          playNext(currentSegmentIndex);
-        }
-      }
-    }
-  };
+  const effectiveModelReady = usePaidMode || modelStatus === 'ready';
+  const showSplash = !usePaidMode && modelStatus !== 'ready';
 
-  const reset = () => {
-    setIsPlaying(false);
-    setCurrentSegmentIndex(-1);
-    setProgress(0);
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
-  };
+  const MeditateIcon = ({ size = 14 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="4" r="2.5"/>
+      <path d="M12 7v4"/>
+      <path d="M8 10c-2 1-4 3-5 5"/>
+      <path d="M16 10c2 1 4 3 5 5"/>
+      <path d="M4 17c3-4 5.5-5.5 8-5.5s5 1.5 8 5.5"/>
+    </svg>
+  );
 
-  const downloadFullAudio = async () => {
-    if (segments.length === 0 || isGenerating) return;
-    
-    setIsGenerating(true); // Reuse loading state for merging
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const decodedBuffers: AudioBuffer[] = [];
-      
-      // Decode all audio segments
-      for (const seg of segments) {
-        if (seg.type === 'text' && seg.audioUrl) {
-          const response = await fetch(seg.audioUrl);
-          const arrayBuffer = await response.arrayBuffer();
-          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-          decodedBuffers.push(audioBuffer);
-        } else if (seg.type === 'pause' && seg.duration) {
-          // Create silent buffer
-          const silentBuffer = audioCtx.createBuffer(
-            1, 
-            Math.floor(audioCtx.sampleRate * seg.duration), 
-            audioCtx.sampleRate
-          );
-          decodedBuffers.push(silentBuffer);
-        }
-      }
-
-      // Merge buffers
-      const totalLength = decodedBuffers.reduce((acc, buf) => acc + buf.length, 0);
-      const mergedBuffer = audioCtx.createBuffer(
-        1, 
-        totalLength, 
-        audioCtx.sampleRate
-      );
-      
-      let offset = 0;
-      for (const buf of decodedBuffers) {
-        mergedBuffer.getChannelData(0).set(buf.getChannelData(0), offset);
-        offset += buf.length;
-      }
-
-      // Convert to WAV
-      const wavBlob = bufferToWav(mergedBuffer);
-      const url = URL.createObjectURL(wavBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${title.replace(/\s+/g, '_') || 'meditation'}.wav`;
-      link.click();
-    } catch (error) {
-      console.error("Download failed:", error);
-      alert("Failed to merge audio for download.");
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  // Helper to convert AudioBuffer to WAV
-  function bufferToWav(abuffer: AudioBuffer) {
-    const numOfChan = abuffer.numberOfChannels;
-    const length = abuffer.length * numOfChan * 2 + 44;
-    const buffer = new ArrayBuffer(length);
-    const view = new DataView(buffer);
-    const channels = [];
-    let i;
-    let sample;
-    let offset = 0;
-    let pos = 0;
-
-    // write WAVE header
-    setUint32(0x46464952);                         // "RIFF"
-    setUint32(length - 8);                         // file length - 8
-    setUint32(0x45564157);                         // "WAVE"
-
-    setUint32(0x20746d66);                         // "fmt " chunk
-    setUint32(16);                                 // length = 16
-    setUint16(1);                                  // PCM (uncompressed)
-    setUint16(numOfChan);
-    setUint32(abuffer.sampleRate);
-    setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-    setUint16(numOfChan * 2);                      // block-align
-    setUint16(16);                                 // 16-bit (hardcoded)
-
-    setUint32(0x61746164);                         // "data" - chunk
-    setUint32(length - pos - 4);                   // chunk length
-
-    // write interleaved data
-    for (i = 0; i < abuffer.numberOfChannels; i++)
-      channels.push(abuffer.getChannelData(i));
-
-    while (pos < length) {
-      for (i = 0; i < numOfChan; i++) {             // interleave channels
-        sample = Math.max(-1, Math.min(1, channels[i][offset])); // clamp
-        sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0; // scale to 16-bit signed int
-        view.setInt16(pos, sample, true);          // write 16-bit sample
-        pos += 2;
-      }
-      offset++;                                     // next sample
-    }
-
-    return new Blob([buffer], { type: "audio/wav" });
-
-    function setUint16(data: number) {
-      view.setUint16(pos, data, true);
-      pos += 2;
-    }
-
-    function setUint32(data: number) {
-      view.setUint32(pos, data, true);
-      pos += 4;
-    }
-  }
-
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.onended = () => {
-        if (isPlaying) {
-          playNext(currentSegmentIndex + 1);
-        }
-      };
-    }
-  }, [isPlaying, currentSegmentIndex, segments]);
+  const sidebarItems: { id: Page; icon: React.FC<{ size?: number; strokeWidth?: number }>; label: string }[] = [
+    { id: 'meditation', icon: MeditateIcon, label: 'Meditation' },
+    { id: 'video', icon: Film, label: 'Video' },
+  ];
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#e0e0e0] font-sans selection:bg-orange-500/30">
-      <audio ref={audioRef} muted={isMuted} />
-      
-      {/* Background Atmosphere */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-900/10 blur-[120px] rounded-full" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-900/10 blur-[120px] rounded-full" />
-      </div>
-
-      <main className="relative z-10 max-w-4xl mx-auto px-6 py-12 md:py-20">
-        {/* Header */}
-        <header className="mb-12 text-center">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs font-medium uppercase tracking-widest mb-4"
+    <div className="h-screen flex bg-[var(--bg)] text-[var(--text-primary)] font-sans select-none">
+      {/* Model loading splash (only in free mode) */}
+      <AnimatePresence>
+        {showSplash && (
+          <motion.div
+            key="splash"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.6 }}
+            className="fixed inset-0 z-50 bg-[var(--splash-bg)] flex items-center justify-center"
           >
-            <Sparkles size={14} />
-            Gemini 3.1 Powered
-          </motion.div>
-          <motion.h1 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="text-5xl md:text-7xl font-light tracking-tighter mb-4 text-white"
-          >
-            Dhyāna
-          </motion.h1>
-          <motion.p 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="text-gray-400 text-lg max-w-xl mx-auto font-light"
-          >
-            Transform your meditation scripts into deep, resonant Indian English audio with precise pauses.
-          </motion.p>
-        </header>
-
-        {/* Main Interface */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left: Input */}
-          <div className="lg:col-span-7 space-y-6">
-          <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.3 }}
-              className="relative group"
-            >
-              <div className="absolute -inset-0.5 bg-gradient-to-r from-orange-500/20 to-indigo-500/20 rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-1000" />
-              <div className="relative bg-[#121212] border border-white/5 rounded-2xl p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase tracking-widest text-gray-500">Session Title</label>
-                    <input 
-                      type="text"
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      placeholder="e.g. Morning Zen"
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:ring-1 focus:ring-orange-500/50 outline-none transition"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase tracking-widest text-gray-500">Short Description</label>
-                    <input 
-                      type="text"
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      placeholder="e.g. Focus on breath"
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:ring-1 focus:ring-orange-500/50 outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase tracking-widest text-gray-500">Script Content</label>
-                  <textarea
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder="Enter your meditation script..."
-                    className="w-full h-48 bg-white/5 border border-white/10 rounded-lg p-4 text-lg font-light leading-relaxed resize-none placeholder:text-gray-600 focus:ring-1 focus:ring-orange-500/50 outline-none transition"
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-white/5">
-                  <div className="flex gap-6">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Voice</span>
-                      <select 
-                        value={selectedVoice}
-                        onChange={(e) => setSelectedVoice(e.target.value)}
-                        className="bg-transparent text-sm text-gray-300 border-none p-0 focus:ring-0 cursor-pointer hover:text-white transition"
-                      >
-                        {voices.map(v => <option key={v.id} value={v.id} className="bg-[#121212]">{v.label}</option>)}
-                      </select>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Pace ({pace}x)</span>
-                      <input 
-                        type="range" 
-                        min="0.5" 
-                        max="1.5" 
-                        step="0.1" 
-                        value={pace}
-                        onChange={(e) => setPace(parseFloat(e.target.value))}
-                        className="w-24 accent-orange-500"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={downloadFullAudio}
-                      disabled={segments.length === 0 || isGenerating}
-                      className="flex items-center gap-2 px-4 py-2 bg-white/5 text-white border border-white/10 rounded-full font-medium hover:bg-white/10 transition-all disabled:opacity-20"
-                      title="Download as WAV (High Fidelity)"
-                    >
-                      <Download size={18} />
-                    </button>
-                    <button
-                      onClick={generateAudio}
-                      disabled={isGenerating || isModelLoading || !text.trim()}
-                      className="flex items-center gap-2 px-6 py-2 bg-white text-black rounded-full font-medium hover:bg-orange-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-white/5"
-                    >
-                      {isGenerating || isModelLoading ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-                      {isModelLoading 
-                        ? `Loading Model (${Math.round(modelLoadProgress)}%)...` 
-                        : isGenerating ? 'Processing...' : 'Generate Audio'}
-                    </button>
-                  </div>
-                </div>
+            <div className="flex flex-col items-center text-center px-6 max-w-sm w-full">
+              <div className="w-16 h-16 rounded-full border border-[var(--border)] flex items-center justify-center mb-6">
+                {modelStatus === 'error'
+                  ? <AlertTriangle size={24} className="text-red-400" />
+                  : <Wind size={24} strokeWidth={1} className="text-[var(--text-muted)]" />}
               </div>
-            </motion.div>
 
-            {/* Legend */}
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.4 }}
-              className="flex flex-wrap gap-4 text-[11px] uppercase tracking-widest text-gray-500"
-            >
-              <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                <span className="text-orange-400 font-bold">.</span> 1s Pause
-              </div>
-              <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                <span className="text-orange-400 font-bold">...</span> 5s Pause
-              </div>
-              <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                <span className="text-orange-400 font-bold">......</span> 10s Pause
-              </div>
-              <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                <span className="text-orange-400 font-bold">↵</span> 10s Pause
-              </div>
-            </motion.div>
-          </div>
+              <h1 className="text-2xl font-light tracking-tight mb-1">Dhyāna</h1>
+              <p className="text-[var(--text-muted)] text-xs mb-8">Loading voice model</p>
 
-          {/* Right: Player & Visuals */}
-          <div className="lg:col-span-5 space-y-6">
-            <motion.div 
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.5 }}
-              className="bg-[#121212] border border-white/5 rounded-2xl p-8 flex flex-col items-center justify-center text-center min-h-[400px]"
-            >
-              {/* Visualizer Circle */}
-              <div className="relative w-48 h-48 mb-8">
-                <AnimatePresence>
-                  {isPlaying && (
+              {modelStatus === 'loading' && (
+                <div className="w-full space-y-2">
+                  <div className="w-full h-1 bg-[var(--bg-input)] rounded-full overflow-hidden">
                     <motion.div
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ 
-                        scale: [1, 1.2, 1],
-                        opacity: [0.3, 0.1, 0.3]
-                      }}
-                      exit={{ scale: 0.8, opacity: 0 }}
-                      transition={{ 
-                        duration: 4, 
-                        repeat: Infinity, 
-                        ease: "easeInOut" 
-                      }}
-                      className="absolute inset-0 bg-orange-500 rounded-full blur-3xl"
+                      className="h-full bg-[var(--accent)] rounded-full"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${modelLoadProgress}%` }}
+                      transition={{ ease: 'easeOut' }}
                     />
-                  )}
-                </AnimatePresence>
-                <div className={`relative w-full h-full rounded-full border-2 border-white/10 flex items-center justify-center transition-all duration-1000 ${isPlaying ? 'border-orange-500/50 scale-110' : ''}`}>
-                  {isPlaying ? (
-                    <div className="flex gap-1 items-end h-12">
-                      {[...Array(5)].map((_, i) => (
-                        <motion.div
-                          key={i}
-                          animate={{ height: [20, 48, 20] }}
-                          transition={{ 
-                            duration: 0.8, 
-                            repeat: Infinity, 
-                            delay: i * 0.1,
-                            ease: "easeInOut"
-                          }}
-                          className="w-1.5 bg-orange-500 rounded-full"
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-gray-600">
-                      <Wind size={48} strokeWidth={1} />
-                    </div>
-                  )}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-[var(--text-muted)]">
+                    <span>
+                      {totalBytes > 0
+                        ? `${(loadedBytes / 1024 / 1024).toFixed(1)} / ${(totalBytes / 1024 / 1024).toFixed(1)} MB`
+                        : 'Connecting...'}
+                    </span>
+                    <span>{Math.round(modelLoadProgress)}%</span>
+                  </div>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-3">~80 MB &middot; cached after first load</p>
                 </div>
-              </div>
+              )}
 
-              <div className="w-full space-y-6">
-                <div>
-                  <h3 className="text-xl font-light mb-1">
-                    {currentSegmentIndex >= 0 ? (
-                      segments[currentSegmentIndex].type === 'text' ? 'Chanting...' : 'Mindful Silence...'
-                    ) : (title || 'Ready to begin')}
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    {currentSegmentIndex >= 0 && segments[currentSegmentIndex].type === 'text' 
-                      ? `"${segments[currentSegmentIndex].content}"` 
-                      : currentSegmentIndex >= 0 ? `${segments[currentSegmentIndex].duration.toFixed(1)}s pause` : (description || 'Press play to start your journey')}
+              {modelStatus === 'error' && (
+                <div className="w-full space-y-3">
+                  <div className="bg-red-500/10 border border-red-500/20 rounded p-3">
+                    <p className="text-red-400 text-xs">{modelError}</p>
+                  </div>
+                  <button
+                    onClick={initTTS}
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[var(--bg-hover)] border border-[var(--border)] rounded text-xs hover:bg-[var(--bg-active)] transition"
+                  >
+                    <RefreshCw size={12} /> Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Settings modal */}
+      <AnimatePresence>
+        {showSettings && (
+          <motion.div
+            key="settings-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-40 flex items-center justify-center"
+            onClick={() => setShowSettings(false)}
+            style={{ background: 'var(--overlay-bg)' }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ duration: 0.2 }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-md rounded-xl border border-[var(--border)] shadow-2xl overflow-hidden"
+              style={{
+                background: 'var(--glass-bg)',
+                backdropFilter: 'blur(40px) saturate(1.4)',
+                WebkitBackdropFilter: 'blur(40px) saturate(1.4)',
+              }}
+            >
+              <div className="px-6 pt-5 pb-4">
+                <h3 className="text-sm font-medium mb-5">Settings</h3>
+
+                {/* TTS Engine toggle */}
+                <div className="mb-5">
+                  <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-2.5">TTS Engine</div>
+
+                  <div className="relative flex rounded-full p-[3px] border border-[var(--glass-border)]" style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(12px)' }}>
+                    <motion.div
+                      className="absolute top-[3px] bottom-[3px] rounded-full"
+                      style={{
+                        background: 'var(--glass-indicator)',
+                        border: '1px solid var(--glass-indicator-border)',
+                        boxShadow: '0 2px 8px rgba(212,149,106,0.15)',
+                        width: 'calc(50% - 3px)',
+                      }}
+                      animate={{ left: ttsMode === 'free' ? '3px' : 'calc(50%)' }}
+                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                    />
+                    <button
+                      onClick={() => setTtsMode('free')}
+                      className={`relative z-10 flex-1 px-4 py-2 text-xs font-medium rounded-full transition-colors ${
+                        ttsMode === 'free' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
+                      }`}
+                    >
+                      Free (Local)
+                    </button>
+                    <button
+                      onClick={() => setTtsMode('paid')}
+                      className={`relative z-10 flex-1 px-4 py-2 text-xs font-medium rounded-full transition-colors ${
+                        ttsMode === 'paid' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
+                      }`}
+                    >
+                      Paid (Cloud)
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] text-[var(--text-muted)] mt-2 px-1">
+                    {ttsMode === 'free'
+                      ? 'Uses Kokoro-82M running locally in your browser. Free, private, ~80 MB download.'
+                      : 'Uses TTS API. Depends on the provider like OpenAI or ElevenLabs. Higher quality, no model download, requires API key.'}
                   </p>
                 </div>
 
-                {/* Progress Bar */}
-                <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${progress}%` }}
-                    className="h-full bg-orange-500"
-                  />
-                </div>
+                {/* API Key (only when paid) */}
+                <AnimatePresence>
+                  {ttsMode === 'paid' && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="mb-4">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">API Key</span>
+                          {apiKey.trim() && (
+                            <span
+                              className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+                              style={{
+                                background: detectedProvider !== 'unknown' ? 'var(--accent-bg)' : 'rgba(239,68,68,0.1)',
+                                color: detectedProvider !== 'unknown' ? 'var(--accent)' : '#ef4444',
+                              }}
+                            >
+                              {PROVIDER_LABELS[detectedProvider]}
+                            </span>
+                          )}
+                        </div>
+                        <div className="relative">
+                          <input
+                            type={showKey ? 'text' : 'password'}
+                            value={apiKey}
+                            onChange={e => setApiKey(e.target.value)}
+                            placeholder="Paste any TTS API key..."
+                            className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm pr-9 outline-none focus:border-[var(--border-strong)] transition font-mono"
+                          />
+                          <button
+                            onClick={() => setShowKey(!showKey)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition"
+                          >
+                            {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-[var(--text-muted)] mt-1.5 px-1">
+                          Provider auto-detected from key format. Supports <span className="text-[var(--text-secondary)]">OpenAI</span> (sk-...) and <span className="text-[var(--text-secondary)]">ElevenLabs</span> (hex).
+                          Stored locally, never shared.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
 
-                {/* Controls */}
-                <div className="flex items-center justify-center gap-6">
-                  <button 
-                    onClick={reset}
-                    className="p-3 text-gray-500 hover:text-white transition"
-                  >
-                    <RotateCcw size={20} />
-                  </button>
-                  <button 
-                    onClick={togglePlay}
-                    disabled={segments.length === 0 || isGenerating}
-                    className="w-16 h-16 bg-white text-black rounded-full flex items-center justify-center hover:bg-orange-500 hover:text-white transition-all transform active:scale-95 disabled:opacity-20"
-                  >
-                    {isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" className="ml-1" />}
-                  </button>
-                  <button 
-                    onClick={() => setIsMuted(!isMuted)}
-                    className="p-3 text-gray-500 hover:text-white transition"
-                  >
-                    {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                  </button>
-                </div>
+              {/* Footer */}
+              <div className="px-6 py-3 border-t border-[var(--border)] flex justify-end">
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="px-4 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border-strong)] rounded hover:bg-[var(--bg-active)] transition font-medium"
+                >
+                  Done
+                </button>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-            {/* Segment List (Mini) */}
-            <div className="bg-[#121212] border border-white/5 rounded-2xl p-4 max-h-[200px] overflow-y-auto custom-scrollbar">
-              <h4 className="text-[10px] uppercase tracking-widest text-gray-500 mb-3 px-2">Sequence</h4>
-              <div className="space-y-2">
-                {segments.length === 0 ? (
-                  <p className="text-xs text-gray-600 px-2 italic">Generate audio to see the sequence...</p>
-                ) : (
-                  segments.map((seg, i) => (
-                    <div 
-                      key={i} 
-                      className={`flex items-center justify-between p-2 rounded-lg text-xs transition ${currentSegmentIndex === i ? 'bg-orange-500/10 text-orange-400' : 'text-sky-400'}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        {seg.type === 'text' ? <Leaf size={12} /> : <Flower2 size={12} />}
-                        <span className="truncate max-w-[180px]">
-                          {seg.type === 'text' ? seg.content : `${seg.duration}s Pause`}
-                        </span>
-                      </div>
-                      {seg.isGenerating && <Loader2 size={12} className="animate-spin" />}
-                      {seg.audioUrl && !seg.isGenerating && <div className="w-1 h-1 bg-orange-500 rounded-full" />}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
+      {/* Sidebar */}
+      <nav className="w-11 shrink-0 bg-[var(--bg-sidebar)] border-r border-[var(--border)] flex flex-col items-center pt-2.5 gap-0.5">
+        {sidebarItems.map(item => (
+          <button
+            key={item.id}
+            onClick={() => setActivePage(item.id)}
+            title={item.label}
+            className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
+              activePage === item.id
+                ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+            }`}
+          >
+            <item.icon size={14} strokeWidth={1.5} />
+          </button>
+        ))}
+
+        <div className="mt-auto mb-2 flex flex-col items-center gap-0.5">
+          <button
+            onClick={() => setShowSettings(true)}
+            title="Settings"
+            className="w-7 h-7 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+          >
+            <Settings size={13} strokeWidth={1.5} />
+          </button>
+          <button
+            onClick={toggleTheme}
+            title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+            className="w-7 h-7 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+          >
+            {theme === 'light' ? <Moon size={13} strokeWidth={1.5} /> : <Sun size={13} strokeWidth={1.5} />}
+          </button>
         </div>
+      </nav>
+
+      {/* Content */}
+      <main className="flex-1 overflow-hidden">
+        {activePage === 'meditation' && (
+          <MeditationGenerator
+            segments={segments}
+            setSegments={setSegments}
+            title={title}
+            setTitle={setTitle}
+            isGenerating={isGenerating}
+            setIsGenerating={setIsGenerating}
+            modelStatus={effectiveModelReady ? 'ready' : modelStatus}
+            generateSegment={generateSegment}
+            onCreateVideo={() => setActivePage('video')}
+          />
+        )}
+        {activePage === 'video' && (
+          <VideoGenerator segments={segments} title={title} />
+        )}
       </main>
 
-      <footer className="max-w-4xl mx-auto px-6 py-12 text-center border-t border-white/5">
-        <p className="text-gray-600 text-xs tracking-widest uppercase">
-          Crafted for inner peace & clarity
-        </p>
-      </footer>
-
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.2);
-        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
       `}</style>
     </div>
   );
