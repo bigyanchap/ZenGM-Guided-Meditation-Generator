@@ -39,6 +39,10 @@ const PROVIDER_LABELS: Record<TtsProvider, string> = {
   unknown: 'Unknown',
 };
 
+function abortError(): DOMException {
+  return new DOMException('Generation cancelled', 'AbortError');
+}
+
 export default function App() {
   const [activePage, setActivePage] = useState<Page>('meditation');
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('theme') as Theme) || 'light');
@@ -130,8 +134,9 @@ export default function App() {
 
   const detectedProvider = detectProvider(apiKey);
 
-  const generateWithOpenAI = useCallback(async (text: string, voice: string): Promise<Blob> => {
+  const generateWithOpenAI = useCallback(async (text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
     const res = await fetch('https://api.openai.com/v1/audio/speech', {
+      signal,
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -148,9 +153,10 @@ export default function App() {
     return res.blob();
   }, [apiKey]);
 
-  const generateWithElevenLabs = useCallback(async (text: string, voice: string): Promise<Blob> => {
+  const generateWithElevenLabs = useCallback(async (text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
     const voiceId = ELEVENLABS_VOICES[voice] || 'TxGEqnHWrfWFTfGW9XjX';
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      signal,
       method: 'POST',
       headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -166,23 +172,49 @@ export default function App() {
     return res.blob();
   }, [apiKey]);
 
-  const generateWithAPI = useCallback(async (text: string, voice: string): Promise<Blob> => {
-    if (detectedProvider === 'openai') return generateWithOpenAI(text, voice);
-    if (detectedProvider === 'elevenlabs') return generateWithElevenLabs(text, voice);
-    return generateWithOpenAI(text, voice);
+  const generateWithAPI = useCallback(async (text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
+    if (detectedProvider === 'openai') return generateWithOpenAI(text, voice, signal);
+    if (detectedProvider === 'elevenlabs') return generateWithElevenLabs(text, voice, signal);
+    return generateWithOpenAI(text, voice, signal);
   }, [detectedProvider, generateWithOpenAI, generateWithElevenLabs]);
 
-  const generateWithWorker = useCallback((text: string, voice: string): Promise<Blob> => {
+  const generateWithWorker = useCallback((text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
     return new Promise<Blob>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(abortError());
+        return;
+      }
+
       const id = nextId.current++;
-      pendingGenerations.current.set(id, { resolve, reject });
+      let settled = false;
+
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener('abort', onAbort);
+        fn();
+      };
+
+      const onAbort = () => {
+        pendingGenerations.current.delete(id);
+        workerRef.current?.postMessage({ type: 'cancel-generate', id });
+        finish(() => reject(abortError()));
+      };
+
+      signal?.addEventListener('abort', onAbort);
+
+      pendingGenerations.current.set(id, {
+        resolve: (blob) => finish(() => resolve(blob)),
+        reject: (e) => finish(() => reject(e)),
+      });
       workerRef.current?.postMessage({ type: 'generate', id, text, voice });
     });
   }, []);
 
-  const generateSegment = useCallback((text: string, voice: string): Promise<Blob> => {
-    if (usePaidMode) return generateWithAPI(text, voice);
-    return generateWithWorker(text, voice);
+  const generateSegment = useCallback((text: string, voice: string, opts?: { signal?: AbortSignal }): Promise<Blob> => {
+    const signal = opts?.signal;
+    if (usePaidMode) return generateWithAPI(text, voice, signal);
+    return generateWithWorker(text, voice, signal);
   }, [usePaidMode, generateWithAPI, generateWithWorker]);
 
   const effectiveModelReady = usePaidMode || modelStatus === 'ready';

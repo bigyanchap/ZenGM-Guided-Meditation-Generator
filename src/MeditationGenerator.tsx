@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Play, Pause, RotateCcw, Download, Volume2, VolumeX,
-  Loader2, Leaf, Flower2, Film
+  Loader2, Leaf, Flower2, Film, X,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { Segment } from './audio-utils';
@@ -15,7 +15,7 @@ interface Props {
   isGenerating: boolean;
   setIsGenerating: (b: boolean) => void;
   modelStatus: 'loading' | 'ready' | 'error';
-  generateSegment: (text: string, voice: string) => Promise<Blob>;
+  generateSegment: (text: string, voice: string, opts?: { signal?: AbortSignal }) => Promise<Blob>;
   onCreateVideo: () => void;
 }
 
@@ -258,6 +258,15 @@ Thank You for doing this Meditation with us.
 
 Namaste.`;
 
+function meditationAbortError(): DOMException {
+  return new DOMException('Generation cancelled', 'AbortError');
+}
+
+function isAbortError(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'AbortError') return true;
+  return e instanceof Error && e.name === 'AbortError';
+}
+
 export default function MeditationGenerator({
   segments, setSegments, title, setTitle,
   isGenerating, setIsGenerating, modelStatus,
@@ -271,12 +280,15 @@ export default function MeditationGenerator({
   const [isMuted, setIsMuted] = useState(false);
   const [progress, setProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const generateAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const el = document.createElement('audio');
     audioRef.current = el;
     return () => { el.pause(); el.remove(); };
   }, []);
+
+  useEffect(() => () => { generateAbortRef.current?.abort(); }, []);
 
   const parseText = (input: string): Segment[] => {
     const lines = input.split(/\n/);
@@ -304,7 +316,16 @@ export default function MeditationGenerator({
     return result;
   };
 
+  const cancelGenerating = () => {
+    generateAbortRef.current?.abort();
+  };
+
   const generateAudio = async () => {
+    generateAbortRef.current?.abort();
+    const ac = new AbortController();
+    generateAbortRef.current = ac;
+    const { signal } = ac;
+
     setIsGenerating(true);
     setIsPlaying(false);
     setCurrentSegmentIndex(-1);
@@ -315,19 +336,28 @@ export default function MeditationGenerator({
       if (modelStatus !== 'ready') throw new Error('TTS model not loaded yet.');
       const updated = [...parsedSegments];
       for (let i = 0; i < updated.length; i++) {
+        if (signal.aborted) throw meditationAbortError();
         const seg = updated[i];
         if (seg.type === 'text' && seg.content) {
           setSegments(prev => prev.map((s, idx) => idx === i ? { ...s, isGenerating: true } : s));
-          const blob = await generateSegment(seg.content, selectedVoice);
+          const blob = await generateSegment(seg.content, selectedVoice, { signal });
           updated[i].audioUrl = URL.createObjectURL(blob);
           setSegments(prev => prev.map((s, idx) => idx === i ? { ...s, isGenerating: false, audioUrl: updated[i].audioUrl } : s));
         }
       }
       setSegments(updated);
-    } catch (error: any) {
-      console.error('Generation failed:', error);
-      alert(`Generation failed: ${error.message || error}`);
+    } catch (error: unknown) {
+      if (isAbortError(error)) {
+        setSegments(prev =>
+          prev.map(s => (s.type === 'text' ? { ...s, isGenerating: false } : s)),
+        );
+      } else {
+        console.error('Generation failed:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        alert(`Generation failed: ${message}`);
+      }
     } finally {
+      generateAbortRef.current = null;
       setIsGenerating(false);
     }
   };
@@ -452,14 +482,27 @@ export default function MeditationGenerator({
         </div>
 
         {/* Generate */}
-        <button
-          onClick={generateAudio}
-          disabled={isGenerating || !text.trim() || modelStatus !== 'ready'}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border-strong)] rounded hover:bg-[var(--bg-active)] transition disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          {isGenerating ? <Loader2 size={12} className="animate-spin" /> : null}
-          {isGenerating ? 'Processing...' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={generateAudio}
+            disabled={isGenerating || !text.trim() || modelStatus !== 'ready'}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border-strong)] rounded hover:bg-[var(--bg-active)] transition disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            {isGenerating ? <Loader2 size={12} className="animate-spin" /> : null}
+            {isGenerating ? 'Processing...' : 'Generate'}
+          </button>
+          {isGenerating && (
+            <button
+              type="button"
+              onClick={cancelGenerating}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-secondary)] rounded hover:bg-[var(--bg-hover)] hover:border-[var(--border-strong)] transition"
+            >
+              <X size={12} />
+              Cancel Generation
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Right: Player + Sequence (1/3, always visible) */}

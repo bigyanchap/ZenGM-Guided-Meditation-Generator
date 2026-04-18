@@ -6,9 +6,15 @@ if (env) {
 }
 
 let tts: any = null;
+const cancelledGenerationIds = new Set<number>();
 
 self.onmessage = async (e: MessageEvent) => {
   const msg = e.data;
+
+  if (msg.type === 'cancel-generate') {
+    cancelledGenerationIds.add(msg.id as number);
+    return;
+  }
 
   if (msg.type === 'init') {
     try {
@@ -37,6 +43,11 @@ self.onmessage = async (e: MessageEvent) => {
       if (!tts) throw new Error('Model not loaded');
       const result = await tts.generate(msg.text, { voice: msg.voice });
 
+      if (cancelledGenerationIds.has(msg.id)) {
+        cancelledGenerationIds.delete(msg.id);
+        return;
+      }
+
       if (!result.audio || result.audio.length === 0) {
         throw new Error(`TTS returned empty audio for: "${msg.text.slice(0, 40)}..."`);
       }
@@ -45,6 +56,10 @@ self.onmessage = async (e: MessageEvent) => {
       const blob: Blob = result.toBlob();
       self.postMessage({ type: 'generated', id: msg.id, blob });
     } catch (err: any) {
+      if (cancelledGenerationIds.has(msg.id)) {
+        cancelledGenerationIds.delete(msg.id);
+        return;
+      }
       self.postMessage({ type: 'generate-error', id: msg.id, error: err.message || String(err) });
     }
   }
