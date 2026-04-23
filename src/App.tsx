@@ -119,14 +119,29 @@ const FREE_TTS_VOICES = [
 ] as const;
 
 const TTS_STYLE_PROMPTS: Record<string, string> = {
-  in_m_whisper: 'Speak in Indian accent, deep male voice, soft-spoken, low intensity, breathy but fully audible. Do not whisper. Maintain clear articulation.',
-  in_m_commanding: 'Speak in Indian accent, deep authoritative tone, calm but commanding, slow pacing.',
-  in_f_whisper: 'Indian accent, deep female voice, soft-spoken, low intensity, breathy but fully audible. Do not whisper. Maintain clear articulation.',
-  in_f_commanding: 'Indian accent, deep mature female voice, confident and grounding, slow and clear.',
-  us_m_whisper: 'American accent, deep male voice, soft-spoken, low intensity, breathy but fully audible. Do not whisper. Maintain clear articulation.',
-  us_m_commanding: 'American accent, deep male voice, calm authority, slow pacing, grounded and confident.',
-  us_f_whisper: 'American accent, deep female voice, soft-spoken, low intensity, breathy but fully audible. Do not whisper. Maintain clear articulation.',
-  us_f_commanding: 'American accent, deep female voice, calm authority, meditative but firm.',
+  in_m_whisper: 
+    'Speak in Indian accent using voice Zubenelgenubi, deep male voice, soft-spoken, low intensity, breathy but fully audible. Do not whisper. Maintain clear articulation.',
+
+  in_m_commanding: 
+    'Speak in Indian accent using voice Zubenelgenubi, deep authoritative tone, calm but commanding, slow pacing.',
+
+  in_f_whisper: 
+    'Speak in Indian accent using voice Sulafat, deep female voice, soft-spoken, low intensity, breathy but fully audible. Do not whisper. Maintain clear articulation.',
+
+  in_f_commanding: 
+    'Speak in Indian accent using voice Sulafat, deep mature female voice, confident and grounding, slow and clear.',
+
+  us_m_whisper: 
+    'Speak in American accent using voice Puck, deep male voice, soft-spoken, low intensity, breathy but fully audible. Do not whisper. Maintain clear articulation.',
+
+  us_m_commanding: 
+    'Speak in American accent using voice Puck, deep male voice, calm authority, slow pacing, grounded and confident.',
+
+  us_f_whisper: 
+    'Speak in American accent using voice Kore, deep female voice, soft-spoken, low intensity, breathy but fully audible. Do not whisper. Maintain clear articulation.',
+
+  us_f_commanding: 
+    'Speak in American accent using voice Kore, deep female voice, calm authority, meditative but firm.',
 };
 
 function buildSmartTtsPrompt(script: string, voiceStylePrompt: string): string {

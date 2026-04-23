@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Play, Pause, RotateCcw, Download, Volume2, VolumeX,
-  Loader2, Leaf, Flower2, Film, X, Info,
+  Loader2, Leaf, Flower2, Film, X, Info, RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Segment } from './audio-utils';
@@ -308,6 +308,8 @@ export default function MeditationGenerator({
   const [iastifyErrorText, setIastifyErrorText] = useState<string | null>(null);
   const [generationErrorText, setGenerationErrorText] = useState<string | null>(null);
   const [downloadErrorText, setDownloadErrorText] = useState<string | null>(null);
+  /** Single-segment regen; separate from full-run `isGenerating` on each segment. */
+  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
   const iastifyInfoWrapRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const generateAbortRef = useRef<AbortController | null>(null);
@@ -458,6 +460,28 @@ export default function MeditationGenerator({
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   };
 
+  const regenerateSegmentAt = async (index: number) => {
+    if (modelStatus !== 'ready' || isGenerating || regeneratingIndex !== null) return;
+    const seg = segments[index];
+    if (seg.type !== 'text' || !seg.content?.trim()) return;
+    setRegeneratingIndex(index);
+    try {
+      const blob = await generateSegment(seg.content, selectedVoice, {});
+      const newUrl = URL.createObjectURL(blob);
+      setSegments(prev => prev.map((s, i) => {
+        if (i !== index) return s;
+        if (s.audioUrl?.startsWith('blob:')) URL.revokeObjectURL(s.audioUrl);
+        return { ...s, audioUrl: newUrl };
+      }));
+    } catch (error: unknown) {
+      console.error('Regenerate failed:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      setGenerationErrorText(sanitizeLlmErrorMessage(message));
+    } finally {
+      setRegeneratingIndex(null);
+    }
+  };
+
   const downloadAudio = async () => {
     if (segments.length === 0 || isGenerating) return;
     try {
@@ -502,6 +526,7 @@ export default function MeditationGenerator({
 
   const hasAudio = segments.some(s => s.audioUrl);
   const hasSegments = segments.length > 0;
+  const regenLocked = isGenerating || regeneratingIndex !== null;
 
   return (
     <div className="h-full flex">
@@ -669,18 +694,33 @@ export default function MeditationGenerator({
               {segments.map((seg, i) => (
                 <div
                   key={i}
-                  className={`flex items-center gap-2 px-2 py-1 rounded text-[11px] transition ${
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] transition ${
                     currentSegmentIndex === i
                       ? 'bg-[var(--accent-bg)] text-[var(--accent)]'
                       : 'text-[var(--text-secondary)]'
                   }`}
                 >
-                  {seg.type === 'text' ? <Leaf size={10} /> : <Flower2 size={10} />}
-                  <span className="truncate flex-1">
+                  {seg.type === 'text' ? <Leaf size={10} className="shrink-0" /> : <Flower2 size={10} className="shrink-0" />}
+                  <span className="truncate flex-1 min-w-0">
                     {seg.type === 'text' ? seg.content : `${seg.duration}s`}
                   </span>
-                  {seg.isGenerating && <Loader2 size={10} className="animate-spin" />}
-                  {seg.audioUrl && !seg.isGenerating && <div className="w-1 h-1 bg-[var(--accent)] rounded-full shrink-0" />}
+                  {seg.type === 'text' && (
+                    <button
+                      type="button"
+                      title="Regenerate this line"
+                      onClick={() => { void regenerateSegmentAt(i); }}
+                      disabled={regenLocked || modelStatus !== 'ready'}
+                      className="shrink-0 p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition disabled:opacity-25 disabled:cursor-not-allowed"
+                    >
+                      {regeneratingIndex === i
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : <RefreshCw size={12} strokeWidth={2} />}
+                    </button>
+                  )}
+                  {seg.isGenerating && <Loader2 size={10} className="animate-spin shrink-0" />}
+                  {seg.audioUrl && !seg.isGenerating && regeneratingIndex !== i && (
+                    <div className="w-1 h-1 bg-[var(--accent)] rounded-full shrink-0" />
+                  )}
                 </div>
               ))}
             </div>
