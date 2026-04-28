@@ -788,7 +788,7 @@ export default function MeditationGenerator({
               <div className="px-5 pt-4 pb-3">
                 <h3 className="text-sm font-medium mb-2">LLM API key required</h3>
                 <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                  IASTify needs a chat-capable key. Add an LLM key in Settings, or use paid TTS with an OpenAI, Google, or Hugging Face key (you can leave LLM empty to reuse the same key).
+                  IASTify needs an LLM key. Add a Gemini, Kimi K2.6, or DeepSeek key in Settings and select the corresponding model.
                 </p>
               </div>
               <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">

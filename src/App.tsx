@@ -5,34 +5,13 @@ import MeditationGenerator from './MeditationGenerator';
 import VideoGenerator from './VideoGenerator';
 import type { Segment } from './audio-utils';
 import { runIastifyLlm, describeIastifyBackend, formatIastifyUserFacingError } from './llm-iastify';
-import { resolveIastifyApiKey } from './api-keys';
 import { appFetch } from './app-fetch';
 
 type Page = 'meditation' | 'video' | 'settings';
 type Theme = 'light' | 'dark';
 type TtsMode = 'free' | 'paid';
-type TtsProvider = 'openai' | 'elevenlabs' | 'huggingface' | 'google' | 'unknown';
-
-function ttsKeyBadgeStyle(p: TtsProvider): { background: string; color: string } {
-  if (p === 'openai' || p === 'elevenlabs' || p === 'huggingface') {
-    return { background: 'var(--accent-bg)', color: 'var(--accent)' };
-  }
-  if (p === 'google') {
-    return { background: 'rgba(59, 130, 246, 0.12)', color: '#3b82f6' };
-  }
-  return { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' };
-}
-
-const OPENAI_VOICES: Record<string, string> = {
-  in_m_whisper: 'onyx',
-  in_m_commanding: 'echo',
-  in_f_whisper: 'nova',
-  in_f_commanding: 'alloy',
-  us_m_whisper: 'onyx',
-  us_m_commanding: 'fable',
-  us_f_whisper: 'shimmer',
-  us_f_commanding: 'alloy',
-};
+type TtsModel = 'gemini' | 'elevenlabs';
+type LlmModel = 'gemini' | 'kimi' | 'deepseek';
 
 const ELEVENLABS_VOICES: Record<string, string> = {
   in_m_whisper: 'TxGEqnHWrfWFTfGW9XjX', // Josh
@@ -45,21 +24,15 @@ const ELEVENLABS_VOICES: Record<string, string> = {
   us_f_commanding: 'MF3mGyEYCl7XYWbV9V6O', // Elli
 };
 
-function detectProvider(key: string): TtsProvider {
-  const k = key.trim();
-  if (k.startsWith('sk-')) return 'openai';
-  if (/^[a-f0-9]{32}$/i.test(k)) return 'elevenlabs';
-  if (k.startsWith('AIza')) return 'google';
-  if (k.startsWith('hf_')) return 'huggingface';
-  return 'unknown';
-}
-
-const PROVIDER_LABELS: Record<TtsProvider, string> = {
-  openai: 'OpenAI (TTS)',
-  elevenlabs: 'ElevenLabs (TTS)',
-  huggingface: 'Hugging Face (TTS)',
-  google: 'Google Gemini (TTS + LLM)',
-  unknown: 'Unknown',
+const ELEVENLABS_VOICE_NAMES: Record<string, string> = {
+  in_f_whisper: 'Aisiri',
+  in_f_commanding: 'Aaliyah',
+  in_m_whisper: 'Aahir',
+  in_m_commanding: 'Aakash',
+  us_f_whisper: 'AImee',
+  us_f_commanding: 'Sultry',
+  us_m_whisper: 'ASMR Mike',
+  us_m_commanding: 'Alton',
 };
 
 function abortError(): DOMException {
@@ -68,8 +41,13 @@ function abortError(): DOMException {
 
 type SettingsForm = {
   ttsMode: TtsMode;
-  apiKey: string;
-  llmApiKey: string;
+  geminiTtsApiKey: string;
+  elevenLabsApiKey: string;
+  ttsModel: TtsModel;
+  geminiLlmApiKey: string;
+  kimiLlmApiKey: string;
+  deepseekLlmApiKey: string;
+  llmModel: LlmModel;
   geminiTtsModel: string;
   geminiLlmModel: string;
 };
@@ -182,8 +160,13 @@ export default function App() {
   const [activePage, setActivePage] = useState<Page>('meditation');
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('theme') as Theme) || 'light');
   const [ttsMode, setTtsMode] = useState<TtsMode>(() => (localStorage.getItem('tts_mode') as TtsMode) || 'free');
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('tts_api_key') || '');
-  const [llmApiKey, setLlmApiKey] = useState(() => localStorage.getItem('llm_api_key') || '');
+  const [geminiTtsApiKey, setGeminiTtsApiKey] = useState(() => localStorage.getItem('tts_gemini_api_key') || '');
+  const [elevenLabsApiKey, setElevenLabsApiKey] = useState(() => localStorage.getItem('tts_elevenlabs_api_key') || '');
+  const [ttsModel, setTtsModel] = useState<TtsModel>(() => (localStorage.getItem('tts_model') as TtsModel) || 'gemini');
+  const [geminiLlmApiKey, setGeminiLlmApiKey] = useState(() => localStorage.getItem('llm_gemini_api_key') || '');
+  const [kimiLlmApiKey, setKimiLlmApiKey] = useState(() => localStorage.getItem('llm_kimi_api_key') || '');
+  const [deepseekLlmApiKey, setDeepseekLlmApiKey] = useState(() => localStorage.getItem('llm_deepseek_api_key') || '');
+  const [llmModel, setLlmModel] = useState<LlmModel>(() => (localStorage.getItem('llm_model_choice') as LlmModel) || 'gemini');
   const [geminiTtsModel, setGeminiTtsModel] = useState(() => normalizeGeminiTtsModel(localStorage.getItem('gemini_tts_model') || ''));
   const [geminiLlmModel, setGeminiLlmModel] = useState(() => localStorage.getItem('gemini_llm_model') || GEMINI_LLM_MODELS[0].value);
   const [showKey, setShowKey] = useState(false);
@@ -206,8 +189,31 @@ export default function App() {
   const pendingGenerations = useRef<Map<number, { resolve: (blob: Blob) => void; reject: (e: Error) => void }>>(new Map());
   const nextId = useRef(0);
 
-  const usePaidMode = ttsMode === 'paid' && apiKey.trim().length > 0;
-  const availableVoices = usePaidMode ? PAID_TTS_VOICES : FREE_TTS_VOICES;
+  const hasGeminiTtsKey = geminiTtsApiKey.trim().length > 0;
+  const hasElevenLabsTtsKey = elevenLabsApiKey.trim().length > 0;
+  const availableTtsModels = useMemo(() => {
+    const list: TtsModel[] = [];
+    if (hasGeminiTtsKey) list.push('gemini');
+    if (hasElevenLabsTtsKey) list.push('elevenlabs');
+    return list;
+  }, [hasGeminiTtsKey, hasElevenLabsTtsKey]);
+  const activeTtsModel: TtsModel | null = availableTtsModels.includes(ttsModel) ? ttsModel : (availableTtsModels[0] ?? null);
+  const usePaidMode = ttsMode === 'paid' && activeTtsModel !== null;
+  const availableVoices = usePaidMode
+    ? (activeTtsModel === 'elevenlabs' ? PAID_TTS_VOICES : PAID_TTS_VOICES)
+    : FREE_TTS_VOICES;
+
+  const hasGeminiLlmKey = geminiLlmApiKey.trim().length > 0;
+  const hasKimiLlmKey = kimiLlmApiKey.trim().length > 0;
+  const hasDeepseekLlmKey = deepseekLlmApiKey.trim().length > 0;
+  const availableLlmModels = useMemo(() => {
+    const list: LlmModel[] = [];
+    if (hasGeminiLlmKey) list.push('gemini');
+    if (hasKimiLlmKey) list.push('kimi');
+    if (hasDeepseekLlmKey) list.push('deepseek');
+    return list;
+  }, [hasGeminiLlmKey, hasKimiLlmKey, hasDeepseekLlmKey]);
+  const activeLlmModel: LlmModel | null = availableLlmModels.includes(llmModel) ? llmModel : (availableLlmModels[0] ?? null);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -218,11 +224,16 @@ export default function App() {
 
   const settingsSnapshot = useCallback((): SettingsForm => ({
     ttsMode,
-    apiKey,
-    llmApiKey,
+    geminiTtsApiKey,
+    elevenLabsApiKey,
+    ttsModel,
+    geminiLlmApiKey,
+    kimiLlmApiKey,
+    deepseekLlmApiKey,
+    llmModel,
     geminiTtsModel,
     geminiLlmModel,
-  }), [ttsMode, apiKey, llmApiKey, geminiTtsModel, geminiLlmModel]);
+  }), [ttsMode, geminiTtsApiKey, elevenLabsApiKey, ttsModel, geminiLlmApiKey, kimiLlmApiKey, deepseekLlmApiKey, llmModel, geminiTtsModel, geminiLlmModel]);
 
   const goToSettings = useCallback(() => {
     if (activePage !== 'settings') {
@@ -236,19 +247,27 @@ export default function App() {
     if (!settingsDraft) return;
     const d = settingsDraft;
     setTtsMode(d.ttsMode);
-    setApiKey(d.apiKey);
-    setLlmApiKey(d.llmApiKey);
+    setGeminiTtsApiKey(d.geminiTtsApiKey);
+    setElevenLabsApiKey(d.elevenLabsApiKey);
+    setTtsModel(d.ttsModel);
+    setGeminiLlmApiKey(d.geminiLlmApiKey);
+    setKimiLlmApiKey(d.kimiLlmApiKey);
+    setDeepseekLlmApiKey(d.deepseekLlmApiKey);
+    setLlmModel(d.llmModel);
     setGeminiTtsModel(d.geminiTtsModel);
     setGeminiLlmModel(d.geminiLlmModel);
     localStorage.setItem('tts_mode', d.ttsMode);
-    localStorage.setItem('tts_api_key', d.apiKey);
-    localStorage.setItem('llm_api_key', d.llmApiKey);
+    localStorage.setItem('tts_gemini_api_key', d.geminiTtsApiKey);
+    localStorage.setItem('tts_elevenlabs_api_key', d.elevenLabsApiKey);
+    localStorage.setItem('tts_model', d.ttsModel);
+    localStorage.setItem('llm_gemini_api_key', d.geminiLlmApiKey);
+    localStorage.setItem('llm_kimi_api_key', d.kimiLlmApiKey);
+    localStorage.setItem('llm_deepseek_api_key', d.deepseekLlmApiKey);
+    localStorage.setItem('llm_model_choice', d.llmModel);
     localStorage.setItem('gemini_tts_model', d.geminiTtsModel);
     localStorage.setItem('gemini_llm_model', d.geminiLlmModel);
-    localStorage.removeItem('llm_iastify_mode');
-    localStorage.removeItem('llm_openai_base');
-    localStorage.removeItem('llm_model');
-    localStorage.removeItem('llm_openai_model');
+    localStorage.removeItem('tts_api_key');
+    localStorage.removeItem('llm_api_key');
     const back = pageBeforeSettingsRef.current;
     pageBeforeSettingsRef.current = null;
     setActivePage(back && back !== 'settings' ? back : 'meditation');
@@ -263,6 +282,24 @@ export default function App() {
   useEffect(() => {
     if (activePage !== 'settings') setSettingsDraft(null);
   }, [activePage]);
+
+  useEffect(() => {
+    if (!settingsDraft || activePage !== 'settings') return;
+    const ttsChoices: TtsModel[] = [];
+    if (settingsDraft.geminiTtsApiKey.trim()) ttsChoices.push('gemini');
+    if (settingsDraft.elevenLabsApiKey.trim()) ttsChoices.push('elevenlabs');
+    const llmChoices: LlmModel[] = [];
+    if (settingsDraft.geminiLlmApiKey.trim()) llmChoices.push('gemini');
+    if (settingsDraft.kimiLlmApiKey.trim()) llmChoices.push('kimi');
+    if (settingsDraft.deepseekLlmApiKey.trim()) llmChoices.push('deepseek');
+    if (ttsChoices.length && !ttsChoices.includes(settingsDraft.ttsModel)) {
+      setSettingsDraft(p => (p ? { ...p, ttsModel: ttsChoices[0] } : p));
+      return;
+    }
+    if (llmChoices.length && !llmChoices.includes(settingsDraft.llmModel)) {
+      setSettingsDraft(p => (p ? { ...p, llmModel: llmChoices[0] } : p));
+    }
+  }, [activePage, settingsDraft]);
 
   const initTTS = useCallback(() => {
     setModelStatus('loading');
@@ -318,35 +355,28 @@ export default function App() {
 
   useEffect(() => { initTTS(); return () => { workerRef.current?.terminate(); }; }, [initTTS]);
 
-  const detectedProvider = detectProvider(apiKey);
-
-  const generateWithOpenAI = useCallback(async (text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
-    const narratedText = buildSmartTtsPrompt(text, TTS_STYLE_PROMPTS[voice] || 'Deep, calm, slow meditative narration.');
-    const res = await appFetch('https://api.openai.com/v1/audio/speech', {
+  const resolveElevenLabsVoiceId = useCallback(async (voice: string, signal?: AbortSignal): Promise<string> => {
+    const key = elevenLabsApiKey.trim();
+    const desiredName = ELEVENLABS_VOICE_NAMES[voice];
+    if (!desiredName) return ELEVENLABS_VOICES[voice] || 'TxGEqnHWrfWFTfGW9XjX';
+    const res = await appFetch('https://api.elevenlabs.io/v1/voices', {
       signal,
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'tts-1',
-        input: narratedText,
-        voice: OPENAI_VOICES[voice] || 'onyx',
-        response_format: 'wav',
-      }),
+      method: 'GET',
+      headers: { 'xi-api-key': key },
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
-      throw new Error(err.error?.message || `API error: ${res.status}`);
-    }
-    return res.blob();
-  }, [apiKey]);
+    if (!res.ok) return ELEVENLABS_VOICES[voice] || 'TxGEqnHWrfWFTfGW9XjX';
+    const data = await res.json().catch(() => ({ voices: [] as { voice_id?: string; name?: string }[] }));
+    const matched = (data.voices || []).find((v: { voice_id?: string; name?: string }) => (v.name || '').trim().toLowerCase() === desiredName.toLowerCase());
+    return matched?.voice_id || ELEVENLABS_VOICES[voice] || 'TxGEqnHWrfWFTfGW9XjX';
+  }, [elevenLabsApiKey]);
 
   const generateWithElevenLabs = useCallback(async (text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
     const narratedText = buildSmartTtsPrompt(text, TTS_STYLE_PROMPTS[voice] || 'Deep, calm, slow meditative narration.');
-    const voiceId = ELEVENLABS_VOICES[voice] || 'TxGEqnHWrfWFTfGW9XjX';
+    const voiceId = await resolveElevenLabsVoiceId(voice, signal);
     const res = await appFetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       signal,
       method: 'POST',
-      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+      headers: { 'xi-api-key': elevenLabsApiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text: narratedText,
         model_id: 'eleven_multilingual_v2',
@@ -358,41 +388,10 @@ export default function App() {
       throw new Error(err.detail?.message || err.detail || `API error: ${res.status}`);
     }
     return res.blob();
-  }, [apiKey]);
-
-  const generateWithHuggingFace = useCallback(async (text: string, _voice: string, signal?: AbortSignal): Promise<Blob> => {
-    const t = buildSmartTtsPrompt(String(text).trim() || ' ', TTS_STYLE_PROMPTS[_voice] || 'Deep, calm, slow meditative narration.');
-    const res = await appFetch('https://api-inference.huggingface.co/models/facebook/mms-tts-eng', {
-      signal,
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputs: t }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({} as { error?: string; detail?: string; message?: string }));
-      const msg = err.error || err.detail || err.message || (typeof err === 'object' ? JSON.stringify(err) : res.statusText);
-      throw new Error(String(msg) || `Hugging Face TTS error: ${res.status}`);
-    }
-    const ct = (res.headers.get('content-type') || '').toLowerCase();
-    if (ct.includes('json')) {
-      const j = await res.json() as { wav?: string; audio?: number[]; error?: string };
-      if (j.error) throw new Error(j.error);
-      if (j.wav) {
-        const bin = atob(j.wav);
-        const u8 = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-        return new Blob([u8], { type: 'audio/wav' });
-      }
-      if (j.audio) {
-        return new Blob([new Int16Array(j.audio).buffer], { type: 'audio/wav' });
-      }
-      throw new Error('Hugging Face TTS returned an unexpected response shape.');
-    }
-    return res.blob();
-  }, [apiKey]);
+  }, [elevenLabsApiKey, resolveElevenLabsVoiceId]);
 
   const generateWithGeminiTts = useCallback(async (text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
-    const k = apiKey.trim();
+    const k = geminiTtsApiKey.trim();
     const selectedModel = normalizeGeminiTtsModel(geminiTtsModel);
     const fallbackModels = GEMINI_TTS_MODELS.map(m => m.value).filter(m => m !== selectedModel);
     const modelsToTry = [selectedModel, ...fallbackModels];
@@ -462,17 +461,13 @@ export default function App() {
       return new Blob([u8], { type: mime });
     }
     throw new Error(lastError);
-  }, [apiKey, geminiTtsModel]);
+  }, [geminiTtsApiKey, geminiTtsModel]);
 
   const generateWithAPI = useCallback(async (text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
-    if (detectedProvider === 'openai') return generateWithOpenAI(text, voice, signal);
-    if (detectedProvider === 'elevenlabs') return generateWithElevenLabs(text, voice, signal);
-    if (detectedProvider === 'huggingface') return generateWithHuggingFace(text, voice, signal);
-    if (detectedProvider === 'google') return generateWithGeminiTts(text, voice, signal);
-    throw new Error(
-      'TTS key was not recognized as OpenAI (sk-…), ElevenLabs (32 hex), Hugging Face (hf_…), or Google Gemini (AIza…). Use Free (local) TTS or a supported key for paid TTS.',
-    );
-  }, [detectedProvider, generateWithOpenAI, generateWithElevenLabs, generateWithHuggingFace, generateWithGeminiTts]);
+    if (activeTtsModel === 'gemini') return generateWithGeminiTts(text, voice, signal);
+    if (activeTtsModel === 'elevenlabs') return generateWithElevenLabs(text, voice, signal);
+    throw new Error('No TTS model is available. Add a Gemini or ElevenLabs TTS API key in Settings.');
+  }, [activeTtsModel, generateWithElevenLabs, generateWithGeminiTts]);
 
   const generateWithWorker = useCallback((text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
     return new Promise<Blob>((resolve, reject) => {
@@ -515,25 +510,28 @@ export default function App() {
 
   const effectiveModelReady = usePaidMode || modelStatus === 'ready';
   const showSplash = !usePaidMode && modelStatus !== 'ready';
-  const effectiveIastifyApiKey = useMemo(
-    () => resolveIastifyApiKey(llmApiKey, apiKey, detectedProvider, usePaidMode),
-    [llmApiKey, apiKey, detectedProvider, usePaidMode],
-  );
+  const effectiveIastifyApiKey = useMemo(() => {
+    if (activeLlmModel === 'gemini') return geminiLlmApiKey.trim();
+    if (activeLlmModel === 'kimi') return kimiLlmApiKey.trim();
+    if (activeLlmModel === 'deepseek') return deepseekLlmApiKey.trim();
+    return '';
+  }, [activeLlmModel, geminiLlmApiKey, kimiLlmApiKey, deepseekLlmApiKey]);
   const hasLlmKey = effectiveIastifyApiKey.length > 0;
 
   const iastifyScript = useCallback(async (script: string) => {
     try {
       return await runIastifyLlm(script, {
         apiKey: effectiveIastifyApiKey,
+        backend: activeLlmModel || 'gemini',
         geminiModel: geminiLlmModel,
         geminiFallbackModels: GEMINI_LLM_MODELS.map(m => m.value).filter(m => m !== geminiLlmModel),
       });
     } catch (e) {
-      const backend = describeIastifyBackend(effectiveIastifyApiKey);
+      const backend = describeIastifyBackend(effectiveIastifyApiKey, activeLlmModel || undefined);
       const detail = formatIastifyUserFacingError(e);
       throw new Error(`Backend: ${backend}\n\n${detail}`);
     }
-  }, [effectiveIastifyApiKey, geminiLlmModel]);
+  }, [effectiveIastifyApiKey, activeLlmModel, geminiLlmModel]);
 
   const MeditateIcon = ({ size = 14 }: { size?: number }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -765,24 +763,13 @@ export default function App() {
                     className="overflow-hidden"
                   >
                     <div className="mb-4">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">TTS API Key</span>
-                        {settingsDraft.apiKey.trim() && (
-                          <span
-                            className="text-[9px] px-1.5 py-0.5 rounded-full font-medium max-w-[14rem] truncate inline-block"
-                            style={ttsKeyBadgeStyle(detectProvider(settingsDraft.apiKey))}
-                            title={PROVIDER_LABELS[detectProvider(settingsDraft.apiKey)]}
-                          >
-                            {PROVIDER_LABELS[detectProvider(settingsDraft.apiKey)]}
-                          </span>
-                        )}
-                      </div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Gemini TTS API Key</div>
                       <div className="relative">
                         <input
                           type={showKey ? 'text' : 'password'}
-                          value={settingsDraft.apiKey}
-                          onChange={e => setSettingsDraft(p => p ? { ...p, apiKey: e.target.value } : p)}
-                          placeholder="Paste TTS API key..."
+                          value={settingsDraft.geminiTtsApiKey}
+                          onChange={e => setSettingsDraft(p => p ? { ...p, geminiTtsApiKey: e.target.value } : p)}
+                          placeholder="Paste Gemini API key..."
                           className="w-full select-text bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm pr-9 outline-none focus:border-[var(--border-strong)] transition font-mono text-[var(--text-primary)]"
                         />
                         <button
@@ -794,34 +781,64 @@ export default function App() {
                         </button>
                       </div>
                       <p className="text-[10px] text-[var(--text-muted)] mt-1.5 px-1 leading-relaxed">
-                        Auto-detect: <span className="text-[var(--text-secondary)]">sk-</span> = OpenAI, 32-char hex = ElevenLabs, <span className="text-[var(--text-secondary)]">hf_</span> = Hugging Face, <span className="text-[var(--text-secondary)]">AIza</span> = Google Gemini. Applied on Save.
+                        If set, Gemini TTS model appears below and can be selected.
                       </p>
                     </div>
 
                     <div className="mb-4">
-                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Gemini TTS Model (for AIza keys)</div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">ElevenLabs TTS API Key</div>
+                      <div className="relative">
+                        <input
+                          type={showKey ? 'text' : 'password'}
+                          value={settingsDraft.elevenLabsApiKey}
+                          onChange={e => setSettingsDraft(p => p ? { ...p, elevenLabsApiKey: e.target.value } : p)}
+                          placeholder="Paste ElevenLabs API key..."
+                          className="w-full select-text bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm pr-9 outline-none focus:border-[var(--border-strong)] transition font-mono text-[var(--text-primary)]"
+                        />
+                      </div>
+                      <p className="text-[10px] text-[var(--text-muted)] mt-1.5 px-1 leading-relaxed">
+                        If set, ElevenLabs TTS model appears and meditation voice dropdown switches to ElevenLabs voices.
+                      </p>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">TTS Model</div>
                       <select
-                        value={settingsDraft.geminiTtsModel}
-                        onChange={e => setSettingsDraft(p => p ? { ...p, geminiTtsModel: e.target.value } : p)}
+                        value={settingsDraft.ttsModel}
+                        onChange={e => setSettingsDraft(p => p ? { ...p, ttsModel: e.target.value as TtsModel } : p)}
                         className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)] transition text-[var(--text-primary)]"
                       >
-                        {GEMINI_TTS_MODELS.map(m => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
+                        {settingsDraft.geminiTtsApiKey.trim() && <option value="gemini">Gemini TTS Model</option>}
+                        {settingsDraft.elevenLabsApiKey.trim() && <option value="elevenlabs">ElevenLabs TTS Model</option>}
                       </select>
                       <p className="text-[10px] text-[var(--text-muted)] mt-1.5 px-1 leading-relaxed">
-                        Used only when your paid TTS key starts with <span className="text-[var(--text-secondary)]">AIza</span>. Recommended: Gemini 3.1 Flash TTS.
+                        A model appears only when its API key is filled.
                       </p>
                     </div>
 
+                    {settingsDraft.geminiTtsApiKey.trim() && (
+                      <div className="mb-4">
+                        <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Gemini TTS Model</div>
+                        <select
+                          value={settingsDraft.geminiTtsModel}
+                          onChange={e => setSettingsDraft(p => p ? { ...p, geminiTtsModel: e.target.value } : p)}
+                          className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)] transition text-[var(--text-primary)]"
+                        >
+                          {GEMINI_TTS_MODELS.map(m => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div className="mb-4">
-                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">LLM API Key</div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Gemini LLM API Key</div>
                       <div className="relative">
                         <input
                           type={showLlmKey ? 'text' : 'password'}
-                          value={settingsDraft.llmApiKey}
-                          onChange={e => setSettingsDraft(p => p ? { ...p, llmApiKey: e.target.value } : p)}
-                          placeholder="Paste LLM API key for IASTify..."
+                          value={settingsDraft.geminiLlmApiKey}
+                          onChange={e => setSettingsDraft(p => p ? { ...p, geminiLlmApiKey: e.target.value } : p)}
+                          placeholder="Paste Gemini LLM API key..."
                           className="w-full select-text bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm pr-9 outline-none focus:border-[var(--border-strong)] transition font-mono text-[var(--text-primary)]"
                         />
                         <button
@@ -832,26 +849,64 @@ export default function App() {
                           {showLlmKey ? <EyeOff size={14} /> : <Eye size={14} />}
                         </button>
                       </div>
-                      <p className="text-[10px] text-[var(--text-muted)] mt-1.5 px-1 leading-relaxed">
-                        IASTify: <span className="text-[var(--text-secondary)]">AIza</span> = Gemini, <span className="text-[var(--text-secondary)]">hf_</span> = Hugging Face, <span className="text-[var(--text-secondary)]">sk-</span> = OpenAI. If you leave this empty, the TTS key above is used when it’s from OpenAI, Google, or Hugging Face (one key for both). ElevenLabs TTS keys need a separate LLM key here. Applied on Save.
-                      </p>
                     </div>
 
                     <div className="mb-4">
-                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Gemini LLM Model (IASTify)</div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Kimi K2.6 LLM API Key</div>
+                      <div className="relative">
+                        <input
+                          type={showLlmKey ? 'text' : 'password'}
+                          value={settingsDraft.kimiLlmApiKey}
+                          onChange={e => setSettingsDraft(p => p ? { ...p, kimiLlmApiKey: e.target.value } : p)}
+                          placeholder="Paste Kimi API key..."
+                          className="w-full select-text bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm pr-9 outline-none focus:border-[var(--border-strong)] transition font-mono text-[var(--text-primary)]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">DeepSeek LLM API Key</div>
+                      <div className="relative">
+                        <input
+                          type={showLlmKey ? 'text' : 'password'}
+                          value={settingsDraft.deepseekLlmApiKey}
+                          onChange={e => setSettingsDraft(p => p ? { ...p, deepseekLlmApiKey: e.target.value } : p)}
+                          placeholder="Paste DeepSeek API key..."
+                          className="w-full select-text bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm pr-9 outline-none focus:border-[var(--border-strong)] transition font-mono text-[var(--text-primary)]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">LLM Model</div>
                       <select
-                        value={settingsDraft.geminiLlmModel}
-                        onChange={e => setSettingsDraft(p => p ? { ...p, geminiLlmModel: e.target.value } : p)}
+                        value={settingsDraft.llmModel}
+                        onChange={e => setSettingsDraft(p => p ? { ...p, llmModel: e.target.value as LlmModel } : p)}
                         className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)] transition text-[var(--text-primary)]"
                       >
-                        {GEMINI_LLM_MODELS.map(m => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
+                        {settingsDraft.geminiLlmApiKey.trim() && <option value="gemini">Gemini</option>}
+                        {settingsDraft.kimiLlmApiKey.trim() && <option value="kimi">Kimi K2.6</option>}
+                        {settingsDraft.deepseekLlmApiKey.trim() && <option value="deepseek">DeepSeek</option>}
                       </select>
                       <p className="text-[10px] text-[var(--text-muted)] mt-1.5 px-1 leading-relaxed">
-                        Used when IASTify resolves to a Gemini key. Recommended: Gemini 3.1 Flash Lite. On model-level quota errors, the app can automatically try the listed fallback models.
+                        A model appears only when its API key is filled.
                       </p>
                     </div>
+
+                    {settingsDraft.geminiLlmApiKey.trim() && settingsDraft.llmModel === 'gemini' && (
+                      <div className="mb-4">
+                        <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Gemini LLM Model (IASTify)</div>
+                        <select
+                          value={settingsDraft.geminiLlmModel}
+                          onChange={e => setSettingsDraft(p => p ? { ...p, geminiLlmModel: e.target.value } : p)}
+                          className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)] transition text-[var(--text-primary)]"
+                        >
+                          {GEMINI_LLM_MODELS.map(m => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>

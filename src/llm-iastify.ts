@@ -1,4 +1,5 @@
 import { appFetch } from './app-fetch';
+type LlmBackend = 'gemini' | 'kimi' | 'deepseek';
 
 /** Redact secrets from error strings shown in the UI. */
 export function sanitizeLlmErrorMessage(raw: string): string {
@@ -10,9 +11,12 @@ export function sanitizeLlmErrorMessage(raw: string): string {
 }
 
 /** Which remote IASTify path is used for this key (for error headers). */
-export function describeIastifyBackend(apiKey: string): string {
+export function describeIastifyBackend(apiKey: string, backendHint?: LlmBackend): string {
   const k = apiKey.trim();
   if (!k) return 'No API key';
+  if (backendHint === 'gemini') return 'Google Gemini';
+  if (backendHint === 'kimi') return 'Kimi K2.6';
+  if (backendHint === 'deepseek') return 'DeepSeek';
   if (k.startsWith('AIza')) return 'Google Gemini';
   if (isHfKey(k)) return 'Hugging Face';
   if (/^[a-f0-9]{32}$/i.test(k)) return 'ElevenLabs (not used for IASTify)';
@@ -267,14 +271,11 @@ async function huggingFaceChatCompletions(
   throw new Error(sanitizeLlmErrorMessage(lastError));
 }
 
-/**
- * IASTify: auto-routes by key (Google, Hugging Face hf_, OpenAI sk-).
- */
 export async function runIastifyLlm(
   script: string,
-  options: { apiKey: string; signal?: AbortSignal; geminiModel?: string; geminiFallbackModels?: string[] },
+  options: { apiKey: string; backend: LlmBackend; signal?: AbortSignal; geminiModel?: string; geminiFallbackModels?: string[] },
 ): Promise<string> {
-  const { apiKey, signal, geminiModel, geminiFallbackModels } = options;
+  const { apiKey, backend, signal, geminiModel, geminiFallbackModels } = options;
   const k = apiKey.trim();
   if (!k) throw new Error('LLM API key is missing.');
 
@@ -288,7 +289,7 @@ Output requirements:
 Script:
 ${script}`;
 
-  if (isGeminiKey(k)) {
+  if (backend === 'gemini') {
     let lastRaw = 'Gemini request failed';
     const orderedGeminiModels = [
       ...(geminiModel?.trim() ? [geminiModel.trim()] : []),
@@ -310,26 +311,35 @@ ${script}`;
     throw new Error(appendGeminiSetupHint(sanitizeLlmErrorMessage(lastRaw), lastRaw));
   }
 
-  if (isHfKey(k)) {
-    return huggingFaceChatCompletions(k, prompt, signal);
+  if (backend === 'kimi') {
+    return openAiCompatibleChat('https://api.moonshot.ai/v1', 'kimi-k2-0711-preview', k, prompt, signal);
   }
 
-  if (/^[a-f0-9]{32}$/i.test(k)) {
-    throw new Error(
-      'This key looks like ElevenLabs (TTS only). For IASTify, set an OpenAI, Google, or Hugging Face key, or use the TTS+LLM key sharing: leave LLM empty and set TTS to OpenAI, Google, or Hugging Face.',
-    );
+  if (backend === 'deepseek') {
+    return openAiCompatibleChat('https://api.deepseek.com/v1', 'deepseek-chat', k, prompt, signal);
   }
 
   const base = DEFAULT_OPENAI_BASE.replace(/\/$/, '');
+  return openAiCompatibleChat(base, DEFAULT_OPENAI_MODEL, k, prompt, signal);
+}
+
+async function openAiCompatibleChat(
+  baseUrl: string,
+  model: string,
+  apiKey: string,
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const base = baseUrl.replace(/\/$/, '');
   const res = await appFetch(`${base}/chat/completions`, {
     method: 'POST',
     signal,
     headers: {
-      Authorization: `Bearer ${k}`,
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: DEFAULT_OPENAI_MODEL,
+      model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0,
     }),

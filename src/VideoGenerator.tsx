@@ -4,8 +4,6 @@ import { motion } from 'motion/react';
 import type { Segment } from './audio-utils';
 import { mergeSegmentsToBuffer, formatTime, decodeBlobToAudioBuffer } from './audio-utils';
 
-type OverlayEffect = 'none' | 'stars' | 'dandelions';
-
 interface Props {
   segments: Segment[];
   title: string;
@@ -33,8 +31,6 @@ export default function VideoGenerator({ segments, title, onGoToMeditation }: Pr
   const [subtitlePaddingX, setSubtitlePaddingX] = useState(22);
   const [subtitlePaddingY, setSubtitlePaddingY] = useState(14);
   const [subtitleOpacity, setSubtitleOpacity] = useState(0.85);
-  const [overlayEffect, setOverlayEffect] = useState<OverlayEffect>('stars');
-  const [overlayIntensity, setOverlayIntensity] = useState(0.16);
   const [voiceAudioFile, setVoiceAudioFile] = useState<File | null>(null);
   const [meditationDuration, setMeditationDuration] = useState(0);
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
@@ -250,8 +246,6 @@ export default function VideoGenerator({ segments, title, onGoToMeditation }: Pr
       canvas.height = ch;
       const ctx2d = canvas.getContext('2d')!;
 
-      const starField = overlayEffect === 'stars' ? createStarField(cw, ch) : null;
-      const dandelionField = overlayEffect === 'dandelions' ? createDandelionField(cw, ch) : null;
       const subtitleFont = `${Math.max(18, Math.min(68, subtitleSize))}px ui-rounded, "Segoe UI", sans-serif`;
 
       const { Muxer, ArrayBufferTarget } = await import('webm-muxer');
@@ -279,13 +273,6 @@ export default function VideoGenerator({ segments, title, onGoToMeditation }: Pr
         } else {
           ctx2d.fillStyle = '#05080d';
           ctx2d.fillRect(0, 0, cw, ch);
-        }
-
-        if (starField && overlayIntensity > 0.01) {
-          drawStars(ctx2d, starField, t, overlayIntensity);
-        }
-        if (dandelionField && overlayIntensity > 0.01) {
-          drawDandelions(ctx2d, dandelionField, t, overlayIntensity);
         }
 
         if (t >= subtitleTrack.start && t <= subtitleTrack.end) {
@@ -559,30 +546,6 @@ export default function VideoGenerator({ segments, title, onGoToMeditation }: Pr
             <RangeField label="Subtitle panel opacity" min={0.25} max={0.95} step={0.01} value={subtitleOpacity} onChange={setSubtitleOpacity} />
             <RangeField label="Subtitle horizontal padding" min={12} max={42} step={1} value={subtitlePaddingX} onChange={setSubtitlePaddingX} />
             <RangeField label="Subtitle vertical padding" min={8} max={26} step={1} value={subtitlePaddingY} onChange={setSubtitlePaddingY} />
-            <div className="md:col-span-2">
-              <label className="block text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Overlay on video</label>
-              <select
-                value={overlayEffect}
-                onChange={(e) => setOverlayEffect(e.target.value as OverlayEffect)}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)] transition text-[var(--text-primary)]"
-              >
-                <option value="none">None</option>
-                <option value="stars">Twinkling stars</option>
-                <option value="dandelions">White dandelions (floating seeds)</option>
-              </select>
-            </div>
-            {overlayEffect !== 'none' && (
-              <div className="md:col-span-2">
-                <RangeField
-                  label="Overlay intensity"
-                  min={0.05}
-                  max={0.5}
-                  step={0.01}
-                  value={overlayIntensity}
-                  onChange={setOverlayIntensity}
-                />
-              </div>
-            )}
           </div>
         </div>
 
@@ -649,7 +612,6 @@ export default function VideoGenerator({ segments, title, onGoToMeditation }: Pr
             <ul className="text-xs text-[var(--text-secondary)] space-y-1.5">
               <li>Track bars show timing for voice, music, image, and subtitles.</li>
               <li>Subtitles: script-based lines when you use the generator; glossy bar at the bottom.</li>
-              <li>Overlays: stars, dandelion seeds, or none in Precise controls.</li>
             </ul>
             {hasVoiceSource && onGoToMeditation && !hasSegmentAudio && (
               <div className="mt-3 pt-3 border-t border-[var(--border)]">
@@ -921,126 +883,4 @@ function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.arcTo(x, y + h, x, y, radius);
   ctx.arcTo(x, y, x + w, y, radius);
   ctx.closePath();
-}
-
-function createStarField(w: number, h: number) {
-  const count = Math.max(70, Math.round((w * h) / 30000));
-  return Array.from({ length: count }, (_, i) => ({
-    x: seeded(i + 1) * w,
-    y: seeded(i + 7) * h * 0.78,
-    size: 0.9 + seeded(i + 13) * 2.2,
-    phase: seeded(i + 19) * Math.PI * 2,
-    speed: 0.3 + seeded(i + 31) * 1.5,
-  }));
-}
-
-function drawStars(ctx: CanvasRenderingContext2D, stars: ReturnType<typeof createStarField>, t: number, density: number) {
-  ctx.save();
-  ctx.globalCompositeOperation = 'screen';
-  for (let i = 0; i < stars.length; i++) {
-    const s = stars[i];
-    const twinkle = 0.5 + 0.5 * Math.sin(t * s.speed + s.phase);
-    const pulse = 0.5 + 0.5 * Math.sin(t * (s.speed * 0.35) + s.phase * 1.7);
-    const alpha = clamp((0.18 + twinkle * 0.82) * density * (0.7 + pulse * 0.45), 0, 1);
-    if (alpha < 0.02) continue;
-
-    // Soft glow layer
-    ctx.globalAlpha = alpha * 0.55;
-    ctx.fillStyle = 'rgba(220,235,255,1)';
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.size * 1.9, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Core sparkle layer
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = 'rgba(255,255,255,1)';
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-type Dandy = {
-  x: number;
-  y0: number;
-  phase: number;
-  r: number;
-  drift: { x: number; y: number };
-  wobble: number;
-};
-
-function createDandelionField(w: number, h: number): Dandy[] {
-  const count = Math.max(18, Math.round((w * h) / 65000));
-  return Array.from({ length: count }, (_, i) => ({
-    x: (0.1 + 0.8 * seeded(i + 3)) * w,
-    y0: (0.05 + 0.5 * seeded(i + 11)) * h,
-    phase: seeded(i + 19) * Math.PI * 2,
-    r: 2.5 + seeded(i + 23) * 4,
-    drift: { x: (seeded(i + 29) - 0.5) * 0.4, y: 12 + seeded(i + 31) * 16 },
-    wobble: 0.4 + seeded(i + 37) * 0.6,
-  }));
-}
-
-function drawDandelions(ctx: CanvasRenderingContext2D, field: Dandy[], t: number, density: number) {
-  const H = ctx.canvas.height;
-  const W = ctx.canvas.width;
-  ctx.save();
-  ctx.globalCompositeOperation = 'screen';
-  for (const d of field) {
-    const band = H * 0.7;
-    const yRaw = d.y0 - t * d.drift.y * 0.9 + Math.sin(t * d.wobble + d.phase) * 5;
-    const y = 0.08 * H + ((yRaw % band) + band) % band;
-    const x = d.x + Math.sin(t * 0.45 + d.phase) * 14 * d.wobble + t * d.drift.x * 0.6;
-    if (x < -40 || x > W + 40) continue;
-    const breath = 0.55 + 0.45 * Math.sin(t * 0.8 + d.phase);
-    const a = clamp(0.2 * breath * (density * 3.2), 0, 0.9);
-    if (a < 0.04) continue;
-
-    // Soft halo
-    const grd = ctx.createRadialGradient(x, y, 0, x, y, d.r * 4.5);
-    grd.addColorStop(0, `rgba(255,255,255,${a * 0.5})`);
-    grd.addColorStop(0.4, `rgba(250,250,255,${a * 0.18})`);
-    grd.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = grd;
-    ctx.beginPath();
-    ctx.arc(x, y, d.r * 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Feathery filaments
-    const fil = 9;
-    ctx.strokeStyle = `rgba(255,255,255,${a * 0.7})`;
-    ctx.lineWidth = 0.6;
-    for (let k = 0; k < fil; k++) {
-      const ang = (k / fil) * Math.PI * 2 + d.phase;
-      const len = d.r * (2.2 + 0.6 * Math.sin(t * 1.1 + k));
-      const x1 = x + Math.cos(ang) * len;
-      const y1 = y + Math.sin(ang) * len;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.quadraticCurveTo(
-        x + Math.cos(ang) * (len * 0.5) + 2,
-        y + Math.sin(ang) * (len * 0.5) - 1,
-        x1,
-        y1,
-      );
-      ctx.stroke();
-    }
-    // Core
-    ctx.globalAlpha = a;
-    ctx.fillStyle = 'rgba(255,255,255,0.95)';
-    ctx.beginPath();
-    ctx.arc(x, y, d.r * 0.35, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function clamp(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, v));
-}
-
-function seeded(n: number): number {
-  const x = Math.sin(n * 12.9898) * 43758.5453;
-  return x - Math.floor(x);
 }
