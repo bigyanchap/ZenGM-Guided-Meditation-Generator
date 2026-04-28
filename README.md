@@ -1,6 +1,6 @@
 # ZenGM - Guided Meditation Generator
 
-**ZenGM - Guided Meditation Generator** — an AI Agentic desktop and web app that turns a written meditation script into spoken audio, using **local text-to-speech** in the browser (no server required for the default mode). Optionally use **OpenAI** or **ElevenLabs** for cloud voices. You can also mux narration with background music and a still image to export a **WebM** video.
+**ZenGM - Guided Meditation Generator** — an AI Agentic desktop and web app that turns a written meditation script into spoken audio, using **local text-to-speech** in the browser (no server required for the default mode). Optionally use **Google Gemini** or **ElevenLabs** for cloud voices. You can also mux narration with background music and a still image to export a **WebM** video.
 
 ## Features
 
