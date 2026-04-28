@@ -7,6 +7,15 @@
 - **Guided meditation editor** — write your script; use `(5)`-style hints for pause length in seconds; pick a voice; generate, play back, and download **WAV**.
 - **Local TTS** — [Kokoro](https://github.com/hexgrad/kokoro) via `kokoro-js` and ONNX Runtime Web; models load in a Web Worker.
 - **Paid TTS (optional)** — paste an API key in Settings; keys are stored in **localStorage** on your machine only. OpenAI (`sk-…`) and ElevenLabs (32-char hex) are auto-detected.
+Voices types:
+  Indian accent, female, deep, whispery,
+  Indian accent, female, deep, persuasive,
+  Indian accent, male, deep, whispery,
+  Indian accent, male, deep, persuasive,
+  American English, female, deep, whispery,
+  American English, female, deep, persuasive,
+  American English, male, deep, whispery,
+  American English, male, deep, persuasive
 - **Video** — combine generated segments with uploaded background music and a cover image; export WebM in-app.
 - **Themes** — light and dark UI.
 

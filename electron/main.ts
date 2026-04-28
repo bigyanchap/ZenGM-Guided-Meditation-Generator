@@ -1,10 +1,16 @@
-import { app, BrowserWindow, ipcMain, net, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, net, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = !app.isPackaged;
+const APP_ID = 'com.dhyana.meditation';
+
+function resolveWindowIconPath(): string {
+  if (isDev) return path.join(app.getAppPath(), 'build', 'icon.ico');
+  return path.join(process.resourcesPath, 'icon.ico');
+}
 
 /** Hosts the renderer is allowed to reach via main-process fetch (CORS-safe packaged builds). */
 const NET_FETCH_ALLOWED_HOSTS = new Set([
@@ -79,6 +85,9 @@ ipcMain.handle('electron-net-fetch', async (_event, payload: NetFetchPayload) =>
 });
 
 function createWindow() {
+  // Remove the native application menu bar (File/Edit/View/Window/Help).
+  Menu.setApplicationMenu(null);
+
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -86,6 +95,7 @@ function createWindow() {
     minHeight: 600,
     title: 'ZenGM - Guided Meditation Generator',
     backgroundColor: '#f7f7f7',
+    icon: resolveWindowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -109,6 +119,7 @@ function createWindow() {
   });
 }
 
+app.setAppUserModelId(APP_ID);
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
