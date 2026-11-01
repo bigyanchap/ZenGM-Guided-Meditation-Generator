@@ -72,7 +72,7 @@ async function decodeAudioDataCopy(ctx: AudioContext, ab: ArrayBuffer): Promise<
 }
 
 /**
- * Decode arbitrary TTS blobs (WAV/MP3/OGG or raw PCM from Gemini) into an AudioBuffer.
+ * Decode arbitrary TTS blobs (WAV/MP3/OGG or raw PCM) into an AudioBuffer.
  */
 export async function decodeBlobToAudioBuffer(
   ctx: AudioContext,
@@ -121,7 +121,7 @@ export async function decodeBlobToAudioBuffer(
   throw new Error('Unable to decode audio data (unsupported or unknown format).');
 }
 
-async function toMonoAtSampleRate(ctx: AudioContext, buffer: AudioBuffer, targetRate: number): Promise<AudioBuffer> {
+export async function toMonoAtSampleRate(ctx: AudioContext, buffer: AudioBuffer, targetRate: number): Promise<AudioBuffer> {
   let b = buffer;
   if (b.numberOfChannels !== 1) {
     const mono = ctx.createBuffer(1, b.length, b.sampleRate);
@@ -180,6 +180,158 @@ export async function mergeSegmentsToBuffer(segments: Segment[]): Promise<AudioB
 
   await audioCtx.close();
   return mergedBuffer;
+}
+
+export interface PauseRange { startSec: number; endSec: number; }
+export interface VoiceTimeline {
+  buffer: AudioBuffer;
+  totalSec: number;
+  voiceSec: number;
+  pauseSec: number;
+  pauseRanges: PauseRange[];
+}
+
+/**
+ * Merge segments like mergeSegmentsToBuffer, but also report where the
+ * pauses fall — the mixer needs them to raise the music bed inside gaps.
+ */
+export async function mergeSegmentsWithTimeline(segments: Segment[]): Promise<VoiceTimeline> {
+  const audioCtx = new AudioContext();
+  const parts: Array<{ buffer: AudioBuffer; isPause: boolean }> = [];
+
+  for (const seg of segments) {
+    if (seg.type === 'text' && seg.audioUrl) {
+      const response = await fetch(seg.audioUrl);
+      const blob = await response.blob();
+      const mime = blob.type || response.headers.get('content-type') || '';
+      const arrayBuffer = await blob.arrayBuffer();
+      parts.push({ buffer: await decodeBlobToAudioBuffer(audioCtx, arrayBuffer, mime), isPause: false });
+    } else if (seg.type === 'pause' && seg.duration) {
+      const sampleRate = parts[0]?.buffer.sampleRate || audioCtx.sampleRate;
+      parts.push({ buffer: audioCtx.createBuffer(1, Math.floor(sampleRate * seg.duration), sampleRate), isPause: true });
+    }
+  }
+
+  if (parts.length === 0) {
+    await audioCtx.close();
+    throw new Error('No audio segments to merge');
+  }
+
+  const targetRate = parts[0].buffer.sampleRate;
+  const normalized: Array<{ buffer: AudioBuffer; isPause: boolean }> = [];
+  for (const p of parts) {
+    normalized.push({ buffer: await toMonoAtSampleRate(audioCtx, p.buffer, targetRate), isPause: p.isPause });
+  }
+
+  const totalLength = normalized.reduce((acc, p) => acc + p.buffer.length, 0);
+  const merged = audioCtx.createBuffer(1, totalLength, targetRate);
+  const pauseRanges: PauseRange[] = [];
+  let offset = 0;
+  let voiceSec = 0;
+  let pauseSec = 0;
+  for (const p of normalized) {
+    merged.getChannelData(0).set(p.buffer.getChannelData(0), offset);
+    const startSec = offset / targetRate;
+    const endSec = (offset + p.buffer.length) / targetRate;
+    if (p.isPause) {
+      pauseRanges.push({ startSec, endSec });
+      pauseSec += endSec - startSec;
+    } else {
+      voiceSec += endSec - startSec;
+    }
+    offset += p.buffer.length;
+  }
+
+  await audioCtx.close();
+  return { buffer: merged, totalSec: totalLength / targetRate, voiceSec, pauseSec, pauseRanges };
+}
+
+/** Concatenate decoded buffers and raw silence (seconds) into one buffer. */
+export async function buildBedFromParts(parts: Array<AudioBuffer | number>): Promise<AudioBuffer> {
+  const audioCtx = new AudioContext();
+  const buffers: AudioBuffer[] = [];
+  for (const part of parts) {
+    if (typeof part === 'number') {
+      const rate = buffers[0]?.sampleRate || audioCtx.sampleRate;
+      buffers.push(audioCtx.createBuffer(1, Math.max(1, Math.floor(rate * part)), rate));
+    } else {
+      buffers.push(part);
+    }
+  }
+  if (buffers.length === 0) {
+    await audioCtx.close();
+    throw new Error('No bed parts to stitch');
+  }
+  const targetRate = buffers[0].sampleRate;
+  const normalized: AudioBuffer[] = [];
+  for (const b of buffers) normalized.push(await toMonoAtSampleRate(audioCtx, b, targetRate));
+  const totalLength = normalized.reduce((acc, b) => acc + b.length, 0);
+  const out = audioCtx.createBuffer(1, totalLength, targetRate);
+  let offset = 0;
+  for (const b of normalized) {
+    out.getChannelData(0).set(b.getChannelData(0), offset);
+    offset += b.length;
+  }
+  await audioCtx.close();
+  return out;
+}
+
+export interface MixOptions {
+  /** Music gain while the voice is speaking (0–1). */
+  musicUnderVoice: number;
+  /** Music gain inside pauses (0–1). */
+  musicInPauses: number;
+  pauseRanges: PauseRange[];
+}
+
+/**
+ * Mix the voice timeline with a music bed: the bed loops (or is trimmed) to
+ * the voice length, sits low under speech and rises inside pauses, with
+ * smooth ~0.4 s transitions. This is what makes long gaps feel alive
+ * instead of dead.
+ */
+export async function mixVoiceAndMusic(voice: AudioBuffer, music: AudioBuffer, opts: MixOptions): Promise<AudioBuffer> {
+  const sampleRate = voice.sampleRate;
+  const length = voice.length;
+  const offline = new OfflineAudioContext(1, length, sampleRate);
+
+  const voiceSrc = offline.createBufferSource();
+  voiceSrc.buffer = voice;
+  voiceSrc.connect(offline.destination);
+  voiceSrc.start(0);
+
+  const musicMono = music.numberOfChannels > 1
+    ? (() => { const m = offline.createBuffer(1, music.length, music.sampleRate); m.getChannelData(0).set(music.getChannelData(0)); return m; })()
+    : music;
+  const musicSrc = offline.createBufferSource();
+  musicSrc.buffer = musicMono;
+  musicSrc.loop = true;
+  const musicGain = offline.createGain();
+  const totalSec = length / sampleRate;
+  const tau = 0.4;
+  musicGain.gain.setValueAtTime(opts.musicInPauses, 0);
+  for (const range of opts.pauseRanges) {
+    musicGain.gain.setTargetAtTime(opts.musicUnderVoice, Math.max(0, range.startSec - 1), tau);
+    musicGain.gain.setTargetAtTime(opts.musicInPauses, range.startSec, tau);
+    musicGain.gain.setTargetAtTime(opts.musicUnderVoice, range.endSec, tau);
+  }
+  musicGain.gain.setTargetAtTime(opts.musicInPauses, Math.max(0, totalSec - 2), tau);
+  musicSrc.connect(musicGain).connect(offline.destination);
+  musicSrc.start(0);
+  musicSrc.stop(totalSec);
+
+  return offline.startRendering();
+}
+
+/** Decode any audio blob (WAV/MP3/PCM) into an AudioBuffer. */
+export async function decodeBlob(blob: Blob): Promise<AudioBuffer> {
+  const ctx = new AudioContext();
+  try {
+    const ab = await blob.arrayBuffer();
+    return await decodeBlobToAudioBuffer(ctx, ab, blob.type || '');
+  } finally {
+    await ctx.close();
+  }
 }
 
 export function bufferToWav(abuffer: AudioBuffer): Blob {
