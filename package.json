@@ -12,6 +12,7 @@
     "build": "vite build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "test": "node tests/run.mjs",
     "check-secrets": "node scripts/verify-no-secrets.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
