@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Play, Pause, RotateCcw, Download, Volume2, VolumeX,
-  Loader2, Leaf, Flower2, Film, X, Info, RefreshCw,
+  Loader2, Leaf, Flower2, Film, X, RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Segment } from './audio-utils';
 import { mergeSegmentsToBuffer, bufferToWav } from './audio-utils';
-import { sanitizeLlmErrorMessage } from './llm-iastify';
+import MusicBed from './MusicBed';
 
 interface Props {
   segments: Segment[];
@@ -17,15 +17,12 @@ interface Props {
   setIsGenerating: (b: boolean) => void;
   modelStatus: 'loading' | 'ready' | 'error';
   generateSegment: (text: string, voice: string, opts?: { signal?: AbortSignal }) => Promise<Blob>;
-  hasLlmApiKey: boolean;
-  iastifyScript: (script: string) => Promise<string>;
+  hasElevenLabsKey: boolean;
+  composeElevenLabsMusic: (compositionPlan: Record<string, unknown>, signal?: AbortSignal) => Promise<Blob>;
   onOpenSettings: () => void;
   onCreateVideo: () => void;
   voices: ReadonlyArray<{ id: string; label: string }>;
 }
-
-const IASTIFY_TOOLTIP =
-  'Sanskrit words in the script are converted to IAST (International Alphabet of Sanskrit Transliteration) using your LLM API key in the Settings.';
 
 const DEFAULT_SCRIPT = `Guided meditation for Software Engineers...
 Om Namah Shivaya.
@@ -275,7 +272,7 @@ function formatDetailedError(context: string, err: unknown): string {
   const lines = [
     `${context} failed.`,
     '',
-    `Details: ${sanitizeLlmErrorMessage(base || 'Unknown error')}`,
+    `Details: ${base || 'Unknown error'}`,
   ];
   if (err instanceof Error && err.stack) {
     const stackPreview = toLines(err.stack).slice(0, 3).join('\n');
@@ -293,7 +290,7 @@ function formatDetailedError(context: string, err: unknown): string {
 export default function MeditationGenerator({
   segments, setSegments, title, setTitle,
   isGenerating, setIsGenerating, modelStatus,
-  generateSegment, hasLlmApiKey, iastifyScript, onOpenSettings, onCreateVideo, voices,
+  generateSegment, hasElevenLabsKey, composeElevenLabsMusic, onOpenSettings, onCreateVideo, voices,
 }: Props) {
   const [text, setText] = useState(DEFAULT_SCRIPT);
   const [pace, setPace] = useState(0.8);
@@ -302,15 +299,10 @@ export default function MeditationGenerator({
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(-1);
   const [isMuted, setIsMuted] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [isIastifying, setIsIastifying] = useState(false);
-  const [showLlmKeyDialog, setShowLlmKeyDialog] = useState(false);
-  const [iastifyInfoOpen, setIastifyInfoOpen] = useState(false);
-  const [iastifyErrorText, setIastifyErrorText] = useState<string | null>(null);
   const [generationErrorText, setGenerationErrorText] = useState<string | null>(null);
   const [downloadErrorText, setDownloadErrorText] = useState<string | null>(null);
   /** Single-segment regen; separate from full-run `isGenerating` on each segment. */
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
-  const iastifyInfoWrapRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const generateAbortRef = useRef<AbortController | null>(null);
   /** Always read latest pace in play handlers (avoids stale closures on `onended` / pause timers). */
@@ -336,15 +328,6 @@ export default function MeditationGenerator({
     }
   }, [voices, selectedVoice]);
 
-  useEffect(() => {
-    if (!iastifyInfoOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const el = iastifyInfoWrapRef.current;
-      if (el && !el.contains(e.target as Node)) setIastifyInfoOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [iastifyInfoOpen]);
 
   const parseText = (input: string): Segment[] => {
     const lines = input.split(/\n/);
@@ -410,7 +393,7 @@ export default function MeditationGenerator({
       } else {
         console.error('Generation failed:', error);
         const message = error instanceof Error ? error.message : String(error);
-        setGenerationErrorText(sanitizeLlmErrorMessage(message));
+        setGenerationErrorText(message);
         ac.abort();
         setSegments(prev => {
           for (const s of prev) {
@@ -488,7 +471,7 @@ export default function MeditationGenerator({
     } catch (error: unknown) {
       console.error('Regenerate failed:', error);
       const message = error instanceof Error ? error.message : String(error);
-      setGenerationErrorText(sanitizeLlmErrorMessage(message));
+      setGenerationErrorText(message);
     } finally {
       setRegeneratingIndex(null);
     }
@@ -508,25 +491,6 @@ export default function MeditationGenerator({
     } catch (err) {
       console.error('Download failed:', err);
       setDownloadErrorText(formatDetailedError('Download merge', err));
-    }
-  };
-
-  const handleIastify = async () => {
-    if (!hasLlmApiKey) {
-      setShowLlmKeyDialog(true);
-      return;
-    }
-    if (!text.trim()) return;
-    setIsIastifying(true);
-    try {
-      const transliterated = await iastifyScript(text);
-      setText(transliterated);
-    } catch (err: unknown) {
-      console.error('IASTify failed:', err);
-      const message = err instanceof Error ? err.message : String(err);
-      setIastifyErrorText(sanitizeLlmErrorMessage(message));
-    } finally {
-      setIsIastifying(false);
     }
   };
 
@@ -599,48 +563,12 @@ export default function MeditationGenerator({
           <span><span className="text-[var(--accent)]">(n) is n secs </span></span>
         </div>
 
-        {/* IASTify + Generate */}
+        {/* Generate */}
         <div className="flex items-center gap-2 pt-1">
-          <div ref={iastifyInfoWrapRef} className="relative inline-block shrink-0 mr-6">
-            <button
-              type="button"
-              onClick={handleIastify}
-              disabled={isIastifying || isGenerating || !text.trim()}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border-strong)] rounded hover:bg-[var(--bg-active)] transition disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              {isIastifying ? <Loader2 size={12} className="animate-spin" /> : null}
-              {isIastifying ? 'IASTifying...' : 'IASTify'}
-            </button>
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation();
-                setIastifyInfoOpen(v => !v);
-              }}
-              aria-expanded={iastifyInfoOpen}
-              aria-label="What is IASTify?"
-              className="absolute -right-2 -top-2 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-muted)] shadow-sm hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition"
-            >
-              <Info size={11} strokeWidth={2} />
-            </button>
-            {iastifyInfoOpen && (
-              <div
-                className="absolute left-0 top-full z-20 mt-1.5 w-[min(18rem,calc(100vw-3rem))] rounded-lg border border-[var(--border)] px-3 py-2.5 text-[11px] leading-relaxed text-[var(--text-secondary)] shadow-lg"
-                style={{
-                  background: 'var(--glass-bg)',
-                  backdropFilter: 'blur(12px) saturate(1.2)',
-                  WebkitBackdropFilter: 'blur(12px) saturate(1.2)',
-                }}
-                role="tooltip"
-              >
-                {IASTIFY_TOOLTIP}
-              </div>
-            )}
-          </div>
           <button
             type="button"
             onClick={generateAudio}
-            disabled={isGenerating || isIastifying || !text.trim() || modelStatus !== 'ready'}
+            disabled={isGenerating || !text.trim() || modelStatus !== 'ready'}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border-strong)] rounded hover:bg-[var(--bg-active)] transition disabled:opacity-30 disabled:cursor-not-allowed"
           >
             {isGenerating ? <Loader2 size={12} className="animate-spin" /> : null}
@@ -657,6 +585,13 @@ export default function MeditationGenerator({
             </button>
           )}
         </div>
+        <MusicBed
+          segments={segments}
+          title={title}
+          hasElevenLabsKey={hasElevenLabsKey}
+          composeElevenLabsMusic={composeElevenLabsMusic}
+          onOpenSettings={onOpenSettings}
+        />
       </div>
 
       {/* Right: Player + Sequence (1/3, always visible) */}
@@ -760,60 +695,6 @@ export default function MeditationGenerator({
         )}
       </div>
 
-      <AnimatePresence>
-        {showLlmKeyDialog && (
-          <motion.div
-            key="iastify-llm-dialog"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            onClick={() => setShowLlmKeyDialog(false)}
-            style={{ background: 'var(--overlay-bg)' }}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.2 }}
-              onClick={e => e.stopPropagation()}
-              className="w-full max-w-sm rounded-xl border border-[var(--border)] shadow-2xl overflow-hidden"
-              style={{
-                background: 'var(--glass-bg)',
-                backdropFilter: 'blur(40px) saturate(1.4)',
-                WebkitBackdropFilter: 'blur(40px) saturate(1.4)',
-              }}
-            >
-              <div className="px-5 pt-4 pb-3">
-                <h3 className="text-sm font-medium mb-2">LLM API key required</h3>
-                <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                  IASTify needs an LLM key. Add a Gemini, Kimi K2.6, or DeepSeek key in Settings and select the corresponding model.
-                </p>
-              </div>
-              <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowLlmKeyDialog(false)}
-                  className="px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border)] rounded hover:bg-[var(--bg-hover)] transition"
-                >
-                  OK
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowLlmKeyDialog(false);
-                    onOpenSettings();
-                  }}
-                  className="px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border-strong)] rounded hover:bg-[var(--bg-active)] transition font-medium"
-                >
-                  Open Settings
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {downloadErrorText && (
@@ -905,57 +786,7 @@ export default function MeditationGenerator({
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {iastifyErrorText && (
-          <motion.div
-            key="iastify-error-dialog"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            onClick={() => setIastifyErrorText(null)}
-            style={{ background: 'var(--overlay-bg)' }}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.2 }}
-              onClick={e => e.stopPropagation()}
-              className="w-full max-w-lg max-h-[min(85vh,32rem)] flex flex-col rounded-xl border border-[var(--border)] shadow-2xl overflow-hidden"
-              style={{
-                background: 'var(--glass-bg)',
-                backdropFilter: 'blur(40px) saturate(1.4)',
-                WebkitBackdropFilter: 'blur(40px) saturate(1.4)',
-              }}
-            >
-              <div className="px-5 pt-4 pb-3 min-h-0 overflow-y-auto">
-                <h3 className="text-sm font-medium mb-2">IASTify failed</h3>
-                <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap break-words">
-                  {iastifyErrorText}
-                </p>
-              </div>
-              <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { setIastifyErrorText(null); onOpenSettings(); }}
-                  className="px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border)] rounded hover:bg-[var(--bg-hover)] transition"
-                >
-                  Open Settings
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIastifyErrorText(null)}
-                  className="px-3 py-1.5 text-xs bg-[var(--bg-input)] border border-[var(--border-strong)] rounded hover:bg-[var(--bg-active)] transition font-medium"
-                >
-                  OK
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
     </div>
   );
 }
