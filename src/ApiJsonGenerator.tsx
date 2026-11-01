@@ -113,9 +113,9 @@ export default function ApiJsonGenerator({
   const hasAudio = segments.some(s => s.audioUrl);
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="h-full flex overflow-hidden">
       {/* Left: JSON editor */}
-      <div className="flex-[2] flex flex-col p-6 overflow-y-auto custom-scrollbar">
+      <div className="flex-[2] min-h-0 flex flex-col p-6 overflow-y-auto custom-scrollbar">
         <h2 className="text-xl font-bold text-[var(--text-main)] tracking-tight">Meditation Generator</h2>
         <p className="text-xs text-[var(--text-muted)] mt-1 mb-5">
           ElevenLabs mode — everything comes from your JSON: voice, script, stress and gaps. No music here; add music later in Create Video.
@@ -202,11 +202,11 @@ export default function ApiJsonGenerator({
       </div>
 
       {/* Right: timeline preview + player */}
-      <div className="flex-1 flex flex-col border-l border-[var(--border-ui)] bg-[var(--bg-panel)] overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col border-l border-[var(--border-ui)] bg-[var(--bg-panel)] overflow-hidden">
         <div className="p-4 border-b border-[var(--border-ui)]">
           <h3 className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Timeline</h3>
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1.5">
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3 space-y-1.5">
           {parsed.blueprint ? parsed.blueprint.timeline.map((item, i) => (
             item.type === 'chunk' ? (
               <div key={i} className={`rounded-lg px-3 py-2 text-xs leading-relaxed border ${segments[i]?.audioUrl ? 'border-emerald-500/30 bg-emerald-500/5 text-[var(--text-main)]' : 'border-[var(--border-ui)] bg-[var(--bg-card)] text-[var(--text-main)]'}`}>
@@ -227,31 +227,43 @@ export default function ApiJsonGenerator({
         </div>
 
         <div className="p-4 border-t border-[var(--border-ui)] space-y-3">
-          {mergedUrl ? (
+          {mergedUrl && (
             <>
               {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
               <audio controls src={mergedUrl} className="w-full" />
-              <div className="flex gap-2">
-                <a
-                  href={mergedUrl}
-                  download={`${(parsed.blueprint?.title || 'meditation').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'meditation'}.wav`}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors"
-                >
-                  <Download size={14} /> Download WAV
-                </a>
-                <button
-                  onClick={onCreateVideo}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-ui)] text-xs text-[var(--text-main)] hover:border-purple-500/40 transition-colors"
-                >
-                  <Film size={14} /> Create Video
-                </button>
-              </div>
             </>
-          ) : (
+          )}
+          <div className="flex gap-2">
+            {mergedUrl ? (
+              <a
+                href={mergedUrl}
+                download={`${(parsed.blueprint?.title || 'meditation').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'meditation'}.wav`}
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors"
+              >
+                <Download size={14} /> Download final stitched WAV
+              </a>
+            ) : (
+              <button
+                disabled
+                title={hasAudio ? 'Partial audio exists — generate again to build the full stitched file.' : 'Generate first — the stitched file is built when generation completes.'}
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600/40 text-white/60 text-xs font-medium cursor-not-allowed"
+              >
+                <Download size={14} /> Download final stitched WAV
+              </button>
+            )}
+            <button
+              onClick={onCreateVideo}
+              disabled={!mergedUrl}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-ui)] text-xs text-[var(--text-main)] hover:border-purple-500/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Film size={14} /> Create Video
+            </button>
+          </div>
+          {!mergedUrl && (
             <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
               {hasAudio
-                ? 'Partial audio exists — generate again to build the full merged file.'
-                : 'The player and WAV download appear here after generation. Gaps play as true silence inside the single merged file.'}
+                ? 'Partial audio exists — generate again to build the full stitched file.'
+                : 'The stitched file — every chunk with its gaps as true silence, in one WAV — is built when generation completes.'}
             </p>
           )}
         </div>
