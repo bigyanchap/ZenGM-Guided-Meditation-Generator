@@ -2,9 +2,11 @@ import React, { useState, useRef, useEffect, useCallback, useLayoutEffect, useMe
 import { Film, Wind, AlertTriangle, RefreshCw, Sun, Moon, Settings, Eye, EyeOff, Github, Coffee } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import MeditationGenerator from './MeditationGenerator';
+import ApiJsonGenerator from './ApiJsonGenerator';
+import { KNOWN_PERSONAS, type VoiceSpec } from './voice-blueprint';
 import VideoGenerator from './VideoGenerator';
 import type { Segment } from './audio-utils';
-import { composeElevenLabsMusic, ELEVENLABS_TTS_MODELS, ELEVENLABS_MUSIC_MODELS } from './elevenlabs-music';
+import { ELEVENLABS_TTS_MODELS } from './elevenlabs-music';
 import { appFetch } from './app-fetch';
 
 type Page = 'meditation' | 'video' | 'settings';
@@ -41,7 +43,6 @@ type SettingsForm = {
   ttsMode: TtsMode;
   elevenLabsApiKey: string;
   elevenLabsTtsModel: string;
-  elevenLabsMusicModel: string;
 }
 
 const PAID_TTS_VOICES = [
@@ -71,7 +72,6 @@ export default function App() {
   const [ttsMode, setTtsMode] = useState<TtsMode>(() => (localStorage.getItem('tts_mode') as TtsMode) || 'free');
   const [elevenLabsApiKey, setElevenLabsApiKey] = useState(() => localStorage.getItem('tts_elevenlabs_api_key') || '');
   const [elevenLabsTtsModel, setElevenLabsTtsModel] = useState(() => localStorage.getItem('elevenlabs_tts_model') || ELEVENLABS_TTS_MODELS[0].value);
-  const [elevenLabsMusicModel, setElevenLabsMusicModel] = useState(() => localStorage.getItem('elevenlabs_music_model') || ELEVENLABS_MUSIC_MODELS[0].value);
   const [showKey, setShowKey] = useState(false);
 
   const [settingsDraft, setSettingsDraft] = useState<SettingsForm | null>(null);
@@ -106,8 +106,7 @@ export default function App() {
     ttsMode,
     elevenLabsApiKey,
     elevenLabsTtsModel,
-    elevenLabsMusicModel,
-  }), [ttsMode, elevenLabsApiKey, elevenLabsTtsModel, elevenLabsMusicModel]);
+  }), [ttsMode, elevenLabsApiKey, elevenLabsTtsModel]);
 
   const goToSettings = useCallback(() => {
     if (activePage !== 'settings') {
@@ -123,15 +122,13 @@ export default function App() {
     setTtsMode(d.ttsMode);
     setElevenLabsApiKey(d.elevenLabsApiKey);
     setElevenLabsTtsModel(d.elevenLabsTtsModel);
-    setElevenLabsMusicModel(d.elevenLabsMusicModel);
     localStorage.setItem('tts_mode', d.ttsMode);
     localStorage.setItem('tts_elevenlabs_api_key', d.elevenLabsApiKey);
     localStorage.setItem('elevenlabs_tts_model', d.elevenLabsTtsModel);
-    localStorage.setItem('elevenlabs_music_model', d.elevenLabsMusicModel);
     // Clean up keys from removed providers (Gemini / Kimi / DeepSeek / OpenAI era).
     for (const k of ['tts_gemini_api_key', 'tts_model', 'llm_gemini_api_key', 'llm_kimi_api_key',
       'llm_deepseek_api_key', 'llm_model_choice', 'gemini_tts_model', 'gemini_llm_model',
-      'tts_api_key', 'llm_api_key']) {
+      'tts_api_key', 'llm_api_key', 'elevenlabs_music_model']) {
       localStorage.removeItem(k);
     }
     const back = pageBeforeSettingsRef.current;
@@ -243,14 +240,30 @@ export default function App() {
     return generateWithElevenLabs(text, voice, signal);
   }, [hasElevenLabsTtsKey, generateWithElevenLabs]);
 
-  const composeElevenLabsMusicCb = useCallback((compositionPlan: Record<string, unknown>, signal?: AbortSignal): Promise<Blob> => {
-    return composeElevenLabsMusic({
-      apiKey: elevenLabsApiKey,
-      modelId: elevenLabsMusicModel,
-      compositionPlan,
+  // v2 JSON mode: one ElevenLabs call for one chunk, voiced entirely by the
+  // blueprint's voice block (persona, model, stability, similarity, speed).
+  const generateChunkWithVoice = useCallback(async (text: string, spec: VoiceSpec, signal?: AbortSignal): Promise<Blob> => {
+    if (!hasElevenLabsTtsKey) throw new Error('No ElevenLabs API key. Add it in Settings first.');
+    const isPersona = (KNOWN_PERSONAS as readonly string[]).includes(spec.persona);
+    const voiceId = isPersona || spec.persona.length < 15
+      ? await resolveElevenLabsVoiceId(spec.persona, signal)
+      : spec.persona; // a long, unknown persona value is a raw ElevenLabs voice_id
+    const res = await appFetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       signal,
+      method: 'POST',
+      headers: { 'xi-api-key': elevenLabsApiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        model_id: spec.model_id,
+        voice_settings: { stability: spec.stability, similarity_boost: spec.similarity_boost, speed: spec.speed, style: 0.0, use_speaker_boost: true },
+      }),
     });
-  }, [elevenLabsApiKey, elevenLabsMusicModel]);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: { message: res.statusText } }));
+      throw new Error(err.detail?.message || err.detail || `API error: ${res.status}`);
+    }
+    return res.blob();
+  }, [elevenLabsApiKey, hasElevenLabsTtsKey, resolveElevenLabsVoiceId]);
 
   const generateWithWorker = useCallback((text: string, voice: string, signal?: AbortSignal): Promise<Blob> => {
     return new Promise<Blob>((resolve, reject) => {
@@ -292,7 +305,8 @@ export default function App() {
   }, [usePaidMode, generateWithAPI, generateWithWorker]);
 
   const effectiveModelReady = usePaidMode || modelStatus === 'ready';
-  const showSplash = !usePaidMode && modelStatus !== 'ready';
+  const apiMode = ttsMode === 'paid';
+  const showSplash = !apiMode && modelStatus !== 'ready';
   const MeditateIcon = ({ size = 14 }: { size?: number }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="4" r="2.5"/>
@@ -443,7 +457,20 @@ export default function App() {
 
       {/* Content */}
       <main className="flex-1 overflow-hidden">
-        {activePage === 'meditation' && (
+        {activePage === 'meditation' && (apiMode ? (
+          <ApiJsonGenerator
+            segments={segments}
+            setSegments={setSegments}
+            title={title}
+            setTitle={setTitle}
+            isGenerating={isGenerating}
+            setIsGenerating={setIsGenerating}
+            hasElevenLabsKey={hasElevenLabsTtsKey}
+            generateChunk={generateChunkWithVoice}
+            onOpenSettings={goToSettings}
+            onCreateVideo={() => setActivePage('video')}
+          />
+        ) : (
           <MeditationGenerator
             segments={segments}
             setSegments={setSegments}
@@ -453,13 +480,11 @@ export default function App() {
             setIsGenerating={setIsGenerating}
             modelStatus={effectiveModelReady ? 'ready' : modelStatus}
             generateSegment={generateSegment}
-            hasElevenLabsKey={hasElevenLabsTtsKey}
-            composeElevenLabsMusic={composeElevenLabsMusicCb}
             onOpenSettings={goToSettings}
             onCreateVideo={() => setActivePage('video')}
             voices={availableVoices}
           />
-        )}
+        ))}
         {activePage === 'video' && (
           <VideoGenerator segments={segments} title={title} onGoToMeditation={() => setActivePage('meditation')} />
         )}
@@ -472,7 +497,7 @@ export default function App() {
               </p>
 
               <div className="mb-5">
-                <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-2.5">TTS Engine</div>
+                <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-2.5">Engine</div>
 
                 <div className="relative flex rounded-full p-[3px] border border-[var(--glass-border)]" style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(12px)' }}>
                   <motion.div
@@ -508,8 +533,8 @@ export default function App() {
 
                 <p className="text-[10px] text-[var(--text-muted)] mt-2 px-1">
                   {settingsDraft.ttsMode === 'free'
-                    ? 'Uses Kokoro-82M running locally in your browser. Free, private, ~80 MB download.'
-                    : 'Uses the ElevenLabs API — the only API in ZenGM — for voice and music. Higher quality, no model download, requires an API key.'}
+                    ? 'Everything local: Kokoro-82M voices in the classic generator — script box, voice picker, pace slider. Free, private, ~80 MB voice-model download.'
+                    : 'The generator becomes a pure JSON page: voice, script, stress and gaps all come from your blueprint file, spoken by ElevenLabs. No music inside the meditation — add it later in Create Video. Requires an API key.'}
                 </p>
               </div>
 
@@ -534,39 +559,11 @@ export default function App() {
                         </button>
                       </div>
                       <p className="text-[10px] text-[var(--text-muted)] mt-1.5 px-1 leading-relaxed">
-                        Powers both ElevenLabs voice (TTS) and ElevenLabs Music. Stored only in this browser, never sent anywhere except ElevenLabs.
+                        Powers the ElevenLabs JSON mode. The voice model is chosen per-blueprint, inside the JSON itself. Stored only in this browser, never sent anywhere except ElevenLabs.
                       </p>
                     </div>
 
-                    <div className="mb-4">
-                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">ElevenLabs TTS Model</div>
-                      <select
-                        value={settingsDraft.elevenLabsTtsModel}
-                        onChange={e => setSettingsDraft(p => p ? { ...p, elevenLabsTtsModel: e.target.value } : p)}
-                        className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)] transition text-[var(--text-primary)]"
-                      >
-                        {ELEVENLABS_TTS_MODELS.map(m => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="mb-4">
-                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5">ElevenLabs Music Model</div>
-                      <select
-                        value={settingsDraft.elevenLabsMusicModel}
-                        onChange={e => setSettingsDraft(p => p ? { ...p, elevenLabsMusicModel: e.target.value } : p)}
-                        className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)] transition text-[var(--text-primary)]"
-                      >
-                        {ELEVENLABS_MUSIC_MODELS.map(m => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
-                      </select>
-                      <p className="text-[10px] text-[var(--text-muted)] mt-1.5 px-1 leading-relaxed">
-                        Used by the Music Bed blueprint when its source is ElevenLabs. The free ZenGM Synth needs no key at all.
-                      </p>
-                    </div>
-                  </div>
+                                      </div>
                 )}
 
               <div className="mt-6 pt-4 border-t border-[var(--border)] flex flex-wrap justify-end gap-2">

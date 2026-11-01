@@ -1,13 +1,13 @@
 # ZenGM - Guided Meditation Generator
 
-**ZenGM - Guided Meditation Generator** — an AI Agentic desktop and web app that turns a written meditation script into spoken audio, using **local text-to-speech** in the browser (no server required for the default mode). Optionally use **ElevenLabs** — the only cloud API in the app — for voices and for AI-composed music. A **Music Bed** can also be composed for free, locally, by the built-in ZenGM Synth. You can also mux narration with background music and a still image to export a **WebM** video.
+**ZenGM - Guided Meditation Generator** — an AI Agentic desktop and web app that turns a written meditation script into spoken audio, using **local text-to-speech** in the browser (no server required for the default mode). Optionally use **ElevenLabs** — the only cloud API in the app: switch the Settings engine to API Key and the generator becomes a pure **JSON page** (voice block + a chunk/gap timeline, spoken chunk by chunk with your pauses inserted as true silence). Music is deliberately *not* generated with the meditation — add it later in Create Video. You can also mux narration with background music and a still image to export a **WebM** video.
 
 ## Features
 
 - **Guided meditation editor** — write your script; use `(5)`-style hints for pause length in seconds; pick a voice; generate, play back, and download **WAV**.
 - **Local TTS** — [Kokoro](https://github.com/hexgrad/kokoro) via `kokoro-js` and ONNX Runtime Web; models load in a Web Worker.
 - **Paid TTS (optional)** — paste your ElevenLabs API key in Settings; the key is stored in **localStorage** on your machine only. ElevenLabs is the only API provider in the app.
-- **Music Bed** — a JSON composition blueprint (chunks with `text`, `duration_ms`, `positive_styles`, `negative_styles`, `context_adherence`) drives two engines: **ElevenLabs Music** (paid, uses your credit) or the **ZenGM Synth** (free, local WebAudio — style words map to a tanpura drone, singing bowls, pads, a breathy flute line and nature noise; `duration_ms` is exact). A `{ "type": "silence", "duration_ms": … }` chunk stitches true silence into the bed. Export a **mixed WAV**: the bed sits low under the voice and rises inside your script's pauses.
+- **ElevenLabs JSON mode** — paste a voice blueprint (`title`, `voice { persona, model_id, stability, similarity_boost, speed }`, `timeline` of `{ "chunk": "…" }` / `{ "gap": "20s" }`): one TTS call per chunk, gaps inserted locally as exact silence at zero credit cost. Stress is written into the words themselves (a CAPITALISED word is the pivot; an optional `"delivery"` note becomes a leading audio tag on `eleven_v3`). The Music Bed / ZenGM Synth code from the earlier design remains in the repo (`src/MusicBed.tsx`, `src/synth-engine.ts`, `src/music-blueprint.ts`), parked and not wired into the UI, for a possible future music page.
 Voices types:
   Indian accent, female, deep, whispery,
   Indian accent, female, deep, persuasive,

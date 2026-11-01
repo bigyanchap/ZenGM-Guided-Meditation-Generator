@@ -6,7 +6,6 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import type { Segment } from './audio-utils';
 import { mergeSegmentsToBuffer, bufferToWav } from './audio-utils';
-import MusicBed from './MusicBed';
 
 interface Props {
   segments: Segment[];
@@ -17,8 +16,6 @@ interface Props {
   setIsGenerating: (b: boolean) => void;
   modelStatus: 'loading' | 'ready' | 'error';
   generateSegment: (text: string, voice: string, opts?: { signal?: AbortSignal }) => Promise<Blob>;
-  hasElevenLabsKey: boolean;
-  composeElevenLabsMusic: (compositionPlan: Record<string, unknown>, signal?: AbortSignal) => Promise<Blob>;
   onOpenSettings: () => void;
   onCreateVideo: () => void;
   voices: ReadonlyArray<{ id: string; label: string }>;
@@ -290,7 +287,7 @@ function formatDetailedError(context: string, err: unknown): string {
 export default function MeditationGenerator({
   segments, setSegments, title, setTitle,
   isGenerating, setIsGenerating, modelStatus,
-  generateSegment, hasElevenLabsKey, composeElevenLabsMusic, onOpenSettings, onCreateVideo, voices,
+  generateSegment, onOpenSettings, onCreateVideo, voices,
 }: Props) {
   const [text, setText] = useState(DEFAULT_SCRIPT);
   const [pace, setPace] = useState(0.8);
@@ -585,13 +582,6 @@ export default function MeditationGenerator({
             </button>
           )}
         </div>
-        <MusicBed
-          segments={segments}
-          title={title}
-          hasElevenLabsKey={hasElevenLabsKey}
-          composeElevenLabsMusic={composeElevenLabsMusic}
-          onOpenSettings={onOpenSettings}
-        />
       </div>
 
       {/* Right: Player + Sequence (1/3, always visible) */}

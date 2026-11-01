@@ -15,15 +15,14 @@ import { renderSynthBed } from './synth-engine';
 interface Props {
   segments: Segment[];
   title: string;
+  /** The engine chosen in Settings (the app-wide Engine switch) — not chosen here. */
+  musicSource: 'synth' | 'elevenlabs';
   hasElevenLabsKey: boolean;
   composeElevenLabsMusic: (compositionPlan: Record<string, unknown>, signal?: AbortSignal) => Promise<Blob>;
   onOpenSettings: () => void;
 }
 
-type MusicSource = 'synth' | 'elevenlabs';
-
 const BLUEPRINT_KEY = 'zengm_music_blueprint';
-const SOURCE_KEY = 'zengm_music_source';
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -34,8 +33,7 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function MusicBed({ segments, title, hasElevenLabsKey, composeElevenLabsMusic, onOpenSettings }: Props) {
-  const [source, setSource] = useState<MusicSource>(() => (localStorage.getItem(SOURCE_KEY) as MusicSource) || 'synth');
+export default function MusicBed({ segments, title, musicSource: source, hasElevenLabsKey, composeElevenLabsMusic, onOpenSettings }: Props) {
   const [jsonText, setJsonText] = useState(() => localStorage.getItem(BLUEPRINT_KEY) || MEDITATION_TEMPLATE);
   const [fitToVoice, setFitToVoice] = useState(true);
   const [musicUnderVoice, setMusicUnderVoice] = useState(0.25);
@@ -54,7 +52,6 @@ export default function MusicBed({ segments, title, hasElevenLabsKey, composeEle
   const hasVoiceAudio = segments.some(s => s.type === 'text' && s.audioUrl);
 
   useEffect(() => { localStorage.setItem(BLUEPRINT_KEY, jsonText); }, [jsonText]);
-  useEffect(() => { localStorage.setItem(SOURCE_KEY, source); }, [source]);
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   // Recompute the voice timeline whenever generated voice audio changes.
@@ -155,26 +152,19 @@ export default function MusicBed({ segments, title, hasElevenLabsKey, composeEle
         <h3 className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wider">Music Bed</h3>
       </div>
 
-      {/* Source switch */}
-      <div className="flex items-center gap-4 mb-3 text-xs">
-        <label className="flex items-center gap-1.5 cursor-pointer">
-          <input type="radio" name="zengm-music-source" checked={source === 'synth'} onChange={() => setSource('synth')} className="accent-[var(--accent)]" />
-          Free — ZenGM Synth
-        </label>
-        <label className="flex items-center gap-1.5 cursor-pointer">
-          <input type="radio" name="zengm-music-source" checked={source === 'elevenlabs'} onChange={() => setSource('elevenlabs')} className="accent-[var(--accent)]" />
-          ElevenLabs Music
-        </label>
+      {/* Engine is chosen app-wide in Settings — this page only reflects it. */}
+      <div className="flex items-center gap-2 mb-3 text-xs flex-wrap">
+        <span className="text-[var(--text-secondary)]">
+          Music engine: <b>{source === 'synth' ? 'Free — ZenGM Synth' : 'ElevenLabs Music'}</b>
+        </span>
         <span className="text-[10px] text-[var(--text-muted)]">
           {source === 'synth'
             ? 'Composed in-app from the blueprint. Exact timing, offline, $0.'
             : hasElevenLabsKey
               ? 'Uses your ElevenLabs credit. Chunks are composed by the API; silence chunks are stitched in locally.'
-              : 'Needs an ElevenLabs API key in Settings.'}
+              : 'Selected in Settings, but no ElevenLabs API key is saved yet.'}
         </span>
-        {source === 'elevenlabs' && !hasElevenLabsKey && (
-          <button type="button" onClick={onOpenSettings} className="text-[11px] underline text-[var(--accent)]">Open Settings</button>
-        )}
+        <button type="button" onClick={onOpenSettings} className="text-[11px] underline text-[var(--accent)]">Change in Settings</button>
       </div>
 
       {/* JSON editor */}
