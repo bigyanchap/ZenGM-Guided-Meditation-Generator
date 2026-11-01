@@ -17,8 +17,17 @@ export interface VoiceSpec {
   speed: number;
 }
 
+export type ChunkItem = {
+  type: 'chunk';
+  text: string;
+  delivery?: string;
+  /** Per-chunk overrides of the voice block (this chunk is its own API call). */
+  stability?: number;
+  speed?: number;
+};
+
 export type TimelineItem =
-  | { type: 'chunk'; text: string; delivery?: string }
+  | ChunkItem
   | { type: 'gap'; seconds: number };
 
 export interface VoiceBlueprint {
@@ -144,9 +153,19 @@ export function parseVoiceBlueprint(jsonText: string): VoiceBlueprintParse {
       if (text.length > 600) {
         warnings.push(`${where}: chunk is ${text.length} characters. Shorter chunks (≤ ~500) regenerate more cheaply and pace better.`);
       }
-      const entry: TimelineItem = { type: 'chunk', text };
+      const entry: ChunkItem = { type: 'chunk', text };
       if (typeof item.delivery === 'string' && item.delivery.trim()) {
-        (entry as { delivery?: string }).delivery = item.delivery.trim();
+        entry.delivery = item.delivery.trim();
+      }
+      if (item.stability !== undefined) {
+        const n = numInRange(item.stability, 0, 1);
+        if (n === null) errors.push(`${where}: "stability" must be a number between 0 and 1.`);
+        else entry.stability = n;
+      }
+      if (item.speed !== undefined) {
+        const n = numInRange(item.speed, 0.7, 1.2);
+        if (n === null) errors.push(`${where}: "speed" must be a number between 0.7 and 1.2 (ElevenLabs limit).`);
+        else entry.speed = n;
       }
       timeline.push(entry);
     } else {
@@ -202,9 +221,19 @@ export function blueprintTotals(bp: VoiceBlueprint): BlueprintTotals {
   return { chunks, gaps, spokenChars, spokenWords, estSpokenSec, totalGapSec, estTotalSec: estSpokenSec + totalGapSec };
 }
 
+/** The effective voice spec for one chunk: the voice block, with the
+ *  chunk's own stability/speed overrides applied where present. Persona
+ *  and model always come from the voice block — one voice per piece. */
+export function chunkVoiceSpec(bp: VoiceBlueprint, item: ChunkItem): VoiceSpec {
+  const spec: VoiceSpec = { ...bp.voice };
+  if (item.stability !== undefined) spec.stability = item.stability;
+  if (item.speed !== undefined) spec.speed = item.speed;
+  return spec;
+}
+
 /** The text actually sent to ElevenLabs for a chunk: v3 reads a leading
  *  [delivery] audio tag; other models get the plain text. */
-export function chunkTextForApi(item: Extract<TimelineItem, { type: 'chunk' }>, modelId: string): string {
+export function chunkTextForApi(item: ChunkItem, modelId: string): string {
   if (item.delivery && modelId === 'eleven_v3') return `[${item.delivery}] ${item.text}`;
   return item.text;
 }

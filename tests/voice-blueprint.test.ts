@@ -1,4 +1,5 @@
 import {
+  chunkVoiceSpec,
   parseVoiceBlueprint, parseGapValue, blueprintTotals, chunkTextForApi, DEFAULT_VOICE_BLUEPRINT,
 } from '../src/voice-blueprint';
 
@@ -83,5 +84,33 @@ describe('chunkTextForApi', () => {
     const item = { type: 'chunk' as const, text: 'Rest.', delivery: 'softly' };
     expect(chunkTextForApi(item, 'eleven_v3')).toBe('[softly] Rest.');
     expect(chunkTextForApi(item, 'eleven_multilingual_v2')).toBe('Rest.');
+  });
+});
+
+describe('per-chunk stability/speed overrides', () => {
+  it('keeps valid overrides on the chunk', () => {
+    const r = parseVoiceBlueprint('{"timeline":[{"chunk":"Go.","stability":0.4,"speed":0.95}]}');
+    expect(r.errors).toEqual([]);
+    const item = r.blueprint?.timeline[0];
+    if (item?.type === 'chunk') {
+      expect(item.stability).toBe(0.4);
+      expect(item.speed).toBe(0.95);
+    }
+  });
+  it('rejects out-of-range chunk overrides', () => {
+    expect(parseVoiceBlueprint('{"timeline":[{"chunk":"Go.","stability":2}]}').blueprint).toBe(null);
+    expect(parseVoiceBlueprint('{"timeline":[{"chunk":"Go.","speed":0.5}]}').blueprint).toBe(null);
+  });
+  it('chunkVoiceSpec merges overrides over the voice block', () => {
+    const r = parseVoiceBlueprint('{"voice":{"stability":0.5,"speed":0.9},"timeline":[{"chunk":"Go.","stability":0.4},{"chunk":"Rest."}]}');
+    const bp = r.blueprint!;
+    const first = bp.timeline[0];
+    const second = bp.timeline[1];
+    if (first.type === 'chunk' && second.type === 'chunk') {
+      expect(chunkVoiceSpec(bp, first).stability).toBe(0.4);
+      expect(chunkVoiceSpec(bp, first).speed).toBe(0.9);
+      expect(chunkVoiceSpec(bp, second).stability).toBe(0.5);
+      expect(chunkVoiceSpec(bp, second).persona).toBe('in_m_whisper');
+    }
   });
 });

@@ -3,7 +3,7 @@ import { Wand2, Settings, Download, Film, Loader2, FileJson, Upload } from 'luci
 import type { Segment } from './audio-utils';
 import { mergeSegmentsToBuffer, bufferToWav } from './audio-utils';
 import {
-  parseVoiceBlueprint, blueprintTotals, chunkTextForApi, formatSeconds,
+  parseVoiceBlueprint, blueprintTotals, chunkTextForApi, chunkVoiceSpec, formatSeconds,
   DEFAULT_VOICE_BLUEPRINT, type VoiceSpec,
 } from './voice-blueprint';
 
@@ -86,7 +86,7 @@ export default function ApiJsonGenerator({
         if (item.type !== 'chunk') continue;
         setGeneratingIdx(i);
         setSegments(prev => prev.map((s, j) => (j === i ? { ...s, isGenerating: true } : s)));
-        const blob = await generateChunk(chunkTextForApi(item, bp.voice.model_id), bp.voice, controller.signal);
+        const blob = await generateChunk(chunkTextForApi(item, bp.voice.model_id), chunkVoiceSpec(bp, item), controller.signal);
         const url = URL.createObjectURL(blob);
         segs[i] = { ...segs[i], audioUrl: url, isGenerating: false };
         setSegments([...segs]);
@@ -214,6 +214,7 @@ export default function ApiJsonGenerator({
                 {generatingIdx === i && <Loader2 size={12} className="inline animate-spin mr-1.5 text-purple-400" />}
                 {item.text.length > 140 ? item.text.slice(0, 140) + '…' : item.text}
                 {item.delivery && <span className="block mt-1 text-[10px] uppercase tracking-wider text-purple-300/70">delivery: {item.delivery}{parsed.blueprint!.voice.model_id !== 'eleven_v3' ? ' (v3 only)' : ''}</span>}
+                {(item.stability !== undefined || item.speed !== undefined) && <span className="block mt-1 text-[10px] uppercase tracking-wider text-sky-300/70">{[item.stability !== undefined ? `stability ${item.stability}` : null, item.speed !== undefined ? `speed ${item.speed}` : null].filter(Boolean).join(' · ')}</span>}
               </div>
             ) : (
               <div key={i} className="rounded-lg px-3 py-1.5 text-[11px] text-[var(--text-muted)] bg-[var(--bg-hover)]/50 flex items-center gap-2">
