@@ -18,7 +18,9 @@
     "dist": "npm run build && electron-builder",
     "standalone": "npm run dist",
     "standalone:unpacked": "npm run build && electron-builder --dir",
-    "icon:generate": "node -e \"import pngToIco from 'png-to-ico'; import { writeFile } from 'node:fs/promises'; const buf = await pngToIco('public/logo.png'); await writeFile('build/icon.ico', buf); console.log('generated build/icon.ico');\""
+    "icon:generate": "node scripts/generate-icons.mjs",
+    "predist": "npm run icon:generate",
+    "prepack": "npm run icon:generate"
   },
   "build": {
     "appId": "com.dhyana.meditation",
@@ -34,17 +36,32 @@
       {
         "from": "build/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
       }
     ],
     "win": {
       "target": [
         "nsis"
-      ],
-      "icon": "build/icon.ico"
+      ]
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.healthcare-fitness"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo"
     }
   },
   "dependencies": {

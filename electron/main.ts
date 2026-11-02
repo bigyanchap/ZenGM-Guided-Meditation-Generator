@@ -8,8 +8,11 @@ const isDev = !app.isPackaged;
 const APP_ID = 'com.dhyana.meditation';
 
 function resolveWindowIconPath(): string {
-  if (isDev) return path.join(app.getAppPath(), 'build', 'icon.ico');
-  return path.join(process.resourcesPath, 'icon.ico');
+  // .ico is the Windows format; Linux window icons need the PNG.
+  // (On macOS the window icon is ignored — the app bundle's .icns rules.)
+  const file = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  if (isDev) return path.join(app.getAppPath(), 'build', file);
+  return path.join(process.resourcesPath, file);
 }
 
 /** Hosts the renderer is allowed to reach via main-process fetch (CORS-safe packaged builds). */
