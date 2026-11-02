@@ -4,6 +4,8 @@ Convert a plain guided-meditation script (any format) into the JSON that ZenGM's
 
 **How to use this skill:** give this file to an AI assistant (Claude, ChatGPT, or any assistant that accepts instructions) together with your meditation script, and ask it to convert the script. It will hand you back a `.json` file ready to paste into ZenGM's JSON generator page.
 
+**This is the DEEP meditation skill** — for stillness, deep-rest, and sleep-adjacent pieces. **If the script is a wake-up / morning-energizing piece, use the sibling skill `script_to_wakeup_json` instead** (also in this repo's skills/ folder) — it carries the wake-up arc, brisker gaps, faster tuning, and awake-voice guidance; a deep-meditation treatment would put a morning listener back to sleep.
+
 ## Output shape (exact)
 
 ```json
