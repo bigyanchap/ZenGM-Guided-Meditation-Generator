@@ -195,8 +195,8 @@ export default function ApiJsonGenerator({
         </div>
 
         <p className="text-[11px] text-[var(--text-muted)] mt-5 leading-relaxed">
-          You don't have to write this JSON by hand — hand an AI assistant your plain script together with the matching
-          skill from this repo's skills/ folder — script_to_meditation_json for deep-meditation pieces, script_to_wakeup_json for wake-up pieces — and it returns this JSON ready to paste: gaps are calculated from what each line asks
+          You don't have to write this JSON by hand — hand an AI assistant your plain script together with the
+          script_to_meditation_json skill from this repo's skills/ folder and it returns this JSON ready to paste: gaps are calculated from what each line asks
           of the listener, and stress is written into the words themselves (a CAPITALISED word is the pivot; Sanskrit is never capitalised).
           Gaps are inserted by the app as true silence: any length, zero credits. Only the spoken characters cost credits.
         </p>
