@@ -11,7 +11,7 @@ Convert a plain guided script (any format) into the JSON that ZenGM's ElevenLabs
 1. **Speed is gone.** ElevenLabs' own documentation: on `eleven_v4`, `speed`, `style` and `use_speaker_boost` are not supported — v4 honours only `stability` and `similarity_boost`. v1's speed fields were silent no-ops. Pacing on v4 comes from tags, punctuation, sentence length, stability — and the gaps, which were always local and real.
 2. **Delivery is now written as tags in the chunk text.** v1's `"delivery"` field is only honoured by the app on `eleven_v3`; on v4 the text is sent as written, and v4 *performs* bracket tags (`[softly]`, `[slowly]`, `[exhales]`…) without speaking them. So v2 puts the tag in the text and drops the field.
 3. **Stability moved up.** Meditation batch pipelines cluster near 0.80 for chunk-to-chunk volume consistency (0.50–0.65 caused volume inconsistency across many prompts); ElevenLabs' narration preset is 0.7. v2 baselines: Wake-Up 0.65, Deep 0.75, band 0.5–0.85 — high enough for consistency, dipping lower only where a tag needs room to act.
-4. **IPA pronunciation annotation** for Sanskrit terms that mispronounce (v4-native mechanism), plus numbers spelled out in chunk text.
+4. **IPA pronunciation annotation** for Sanskrit terms — every Sanskrit word or mantra gets an IPA approximation at its first occurrence (v4-native mechanism), plus numbers spelled out in chunk text.
 5. **Deliberately NOT adopted:** context stitching (`previous_text` / request IDs) — meditation practitioners report cumulative volume drift and pace inflation from chaining, so chunks stay independently generated; `seed` (best-effort only, not reproducible in practice); SSML/`<break>` (dead on v4); blanket de-breathing (breaths are cues in this genre).
 
 **One voice, one model, two modes.** Every piece uses **Monika Sogam** on **eleven_v4**. Only the MODE changes — gap lengths and tuning rows — never the voice or model:
@@ -69,7 +69,7 @@ Judge the mode from the script's arc: builds toward rising and beginning the day
 ## Preserve the user's words exactly
 
 - Chunk text is the user's text, verbatim. Never paraphrase, polish, or silently fix wording — flag odd lines in the delivery note instead. (Two v2 exceptions that CHANGE the text by design, both flagged in the delivery note when used: digits spelled out as words, and IPA annotations added beside a Sanskrit term.)
-- Legacy markers are instructions, not text: trailing dots (`Close your eyes...` = 3) and `(n)` markers state the gap after that line in seconds. Convert them to gap entries and restore single terminal punctuation. An explicit marker **always wins** over your calculated gap.
+- Legacy markers are instructions, not text: trailing dots (`Close your eyes...` = 3), `(n)` markers, and bracketed markers (`[60 seconds gap]`, `[30 seconds gap]`) state the gap after that line in seconds. Convert them to gap entries and restore single terminal punctuation. An explicit marker **always wins** over your calculated gap: a marked gap is reproduced at **exactly** its stated seconds — never re-sized to fit the tables, never rounded, and never trimmed by the density guard. The tables size only the gaps the author left unmarked; if marked gaps push the silence share outside the mode's band, report that instead of cutting a marked gap.
 - Sanskrit words stay exactly as written (no transliteration, no respelling). Pronunciation help is added via IPA annotation only — see "Pronunciation".
 
 ## Chunking rules
@@ -131,7 +131,7 @@ Stillness is the medicine. When torn between two values, take the longer one.
 | Return cue before final words | 8–15s |
 | After the final line | No gap |
 
-**Modifiers (both modes):** explicit markers always win; repeated cycles keep equal gaps; Wake-Up gaps may gently shrink as energy builds, Deep gaps may escalate as the listener settles, never oscillate; density guard — spoken estimate = words ÷ 1.6/sec, silence target **Wake-Up 25–40%**, **Deep 35–55%** of estimated runtime, trimming discretionary gaps first (never breath gaps, never the peak); performed-action gaps are real time — if a performed script's silence share exceeds target, flag it rather than trimming below the action; below 2s, no gap at all — merge into one chunk.
+**Modifiers (both modes):** explicit markers always win and are reproduced at exactly their stated seconds — never trimmed; repeated cycles keep equal gaps; Wake-Up gaps may gently shrink as energy builds, Deep gaps may escalate as the listener settles, never oscillate; density guard — spoken estimate = words ÷ 1.6/sec, silence target **Wake-Up 25–40%**, **Deep 35–55%** of estimated runtime, trimming discretionary gaps first (never breath gaps, never the peak); performed-action gaps are real time — if a performed script's silence share exceeds target, flag it rather than trimming below the action; below 2s, no gap at all — merge into one chunk.
 
 ## Delivery tags — your job (new in v2)
 
@@ -209,8 +209,8 @@ Rules (both modes): stability stays within **0.5–0.85**; neighbouring chunks j
 
 ## Pronunciation (new in v2)
 
-- v4's native mechanism is **inline IPA**: the transcription wrapped in slashes inside double quotes, placed with the term — `Gam Ganapataye "/ɡəm ɡəˈnɑːpətəjeɪ/"` — stress marks included. Use it **selectively**: the first occurrence of a term known to mispronounce, and standalone mantra chunks. It rides inside the chunk text, so it is visible in ZenGM's chunk cards — a known cosmetic cost; keep annotations few.
-- Build a small **glossary per piece** (term → IPA) and list it in the delivery note, so the user can correct it once and reuse it across pieces. Recurring vocabulary across many pieces is what ElevenLabs pronunciation dictionaries are for — ZenGM does not support dictionaries yet (app roadmap), so inline IPA is the v2 mechanism.
+- v4's native mechanism is **inline IPA**: the transcription wrapped in slashes inside double quotes, placed with the term — `Gam Ganapataye "/ɡəm ɡəˈnɑːpətəjeɪ/"` — stress marks included. **Rule: every Sanskrit word and mantra receives an IPA approximation** — at its first occurrence in the piece, and always on standalone mantra chunks. Build the approximation from how the word is actually pronounced (long vowels, retroflex consonants, ś/ṣ as "sh"), not from its spelling. It rides inside the chunk text, so it is visible in ZenGM's chunk cards — a known cosmetic cost.
+- Build a small **glossary per piece** (term → IPA) and list it in the delivery note, so the user can correct it once and reuse it across pieces. Once the user has approved a term's IPA, reuse that exact transcription in later pieces — their corrections accumulate into a standing vocabulary. Recurring vocabulary across many pieces is what ElevenLabs pronunciation dictionaries are for — ZenGM does not support dictionaries yet (app roadmap), so inline IPA is the v2 mechanism.
 - **Honesty rule:** no one has published Sanskrit-specific results on ElevenLabs for any model, and v4's IPA "results vary by voice". Every piece's sample must include its hardest mantra line; if Monika still misses, iterate the IPA on that line alone (cheap) rather than respelling the sacred text.
 - Never respell Sanskrit into the chunk text as the default fix, and never capitalise it for stress.
 
@@ -231,8 +231,8 @@ These research findings belong to ZenGM the app, not to this JSON, and v2 does *
 - **No `speed` field anywhere; no `delivery` field anywhere.** Every chunk carries explicit `"stability"` within 0.5–0.85; neighbours jump ≤ 0.1 except across sections; tagged chunks sit at 0.5–0.6.
 - Tag audit: ≤ 1 tag per chunk, only from the vocabulary above, none on counted steps or neutral instruction lines, none on Sanskrit text itself; level-3 lines = caps pivot + own chunk + tag + longer gap.
 - Stress audit: ≤ 1 capitalised word per sentence, ≤ 2 per chunk, ≤ 1 level-3 per section, no capitalised Sanskrit/mantra/function words.
-- Pronunciation audit: IPA annotations match the piece glossary; the sample covered the hardest mantra.
-- No digits anywhere in chunk text (numbers spelled out). No leftover `(n)` markers or dot-run markers (the script's prose ellipses are rhythm and stay).
+- Pronunciation audit: every Sanskrit term carries its IPA approximation at first occurrence; annotations match the piece glossary; the sample covered the hardest mantra.
+- No digits anywhere in chunk text (numbers spelled out). Every author-marked gap (dots, `(n)`, `[N seconds gap]`) reproduced at exactly its stated seconds. No leftover `(n)` markers or dot-run markers (the script's prose ellipses are rhythm and stay).
 - No two gaps in a row; no leading gap; no trailing gap. Every gap a whole-second `"Ns"` string ≥ 2s; the longest gap sits at the mode's peak.
 - Mode audits: Wake-Up — the final chunk is a rise/close; no soft-moment row twice in a row after the midpoint. Deep — silence share in the 35–55% band or the deviation is explained by performed actions.
 - Report: chunk count, spoken characters (tags included), estimated spoken time, total gap time, estimated runtime, longest gap + why, level-3 line location, stability range used, credit estimate (tags budgeted as billed), flagged lines, and the piece glossary if any IPA was used.
